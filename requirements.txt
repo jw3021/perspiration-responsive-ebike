@@ -1,0 +1,6 @@
+adafruit-circuitpython-ads1x15
+adafruit-circuitpython-mcp4725
+RPi.GPIO
+pyserial
+board
+adafruit-blinka
