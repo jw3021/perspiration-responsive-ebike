@@ -271,8 +271,19 @@ def main():
             # 1. READ SENSORS
             raw_torque = torque_sensor.get_torque_nm()
             
-            # Backup safety: if no pulses for > 1.5s, force 0 RPM immediately
-            if (time.time() - last_cadence_time) > 1.5:
+            # Dynamic cadence timeout: calculate expected time between pulses based on current RPM.
+            if current_cadence_rpm > 0.1:
+                # time per pulse at current RPM
+                expected_pulse_interval = (60.0 / current_cadence_rpm) / config.CADENCE_PULSES_PER_REV
+                # allow 60% margin for natural pedaling speed variations (1.6x multiplier)
+                # cap between 0.25s (fastest reliable cutoff) and 1.5s (absolute max)
+                timeout_threshold = expected_pulse_interval * 1.6
+                timeout_threshold = max(0.25, min(1.5, timeout_threshold))
+            else:
+                timeout_threshold = 1.5
+                
+            # If no pulses for > timeout_threshold, force 0 RPM immediately
+            if (time.time() - last_cadence_time) > timeout_threshold:
                 current_cadence_rpm = 0.0
 
             # 2. APPLY SMOOTHING (Asymmetric)
@@ -333,7 +344,7 @@ def main():
             # Debug Stats (Every ~1s)
             # Using a counter
             if (getattr(main, "counter", 0)) % 20 == 0:
-                print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f}")
+                print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f}", flush=True)
             setattr(main, "counter", getattr(main, "counter", 0) + 1)
 
             # Loop Sleep

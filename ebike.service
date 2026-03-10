@@ -1,0 +1,17 @@
+[Unit]
+Description=E-Bike Motor Controller Service
+After=multi-user.target
+
+[Service]
+Type=simple
+# If your Raspberry Pi username is not 'pi', change it below:
+User=pi
+# Ensure these paths match where the code lives on your Raspberry Pi:
+WorkingDirectory=/home/pi/e_bike_controller
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi/e_bike_controller/venv/bin/python -u /home/pi/e_bike_controller/ebike_controller.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

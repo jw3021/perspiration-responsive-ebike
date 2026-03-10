@@ -37,7 +37,7 @@ SERIAL_BAUD = 9600
 # --- CONTROL PARAMETERS ---
 # Smoothing Factors (0.0 to 1.0)
 SMOOTH_RISE_SPEED = 0.2     # Fast response to pedal push
-SMOOTH_FALL_SPEED = 0.01    # Slow decay to bridge pedal gaps
+SMOOTH_FALL_SPEED = 0.1     # Faster decay so motor cuts quicker when pedaling stops
 
 # Safety Thresholds
 MIN_TORQUE_NM = 5.0         # Minimum torque to engage motor
