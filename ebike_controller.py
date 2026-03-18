@@ -83,13 +83,13 @@ class MotorController:
         if not self.connected:
             return
 
-        # Clamp voltage to safe limits (0 to 3.3V)
-        # Note: MCP4725 output is relative to its VDD (3.3V)
+        # Clamp voltage to safe limits (0 to DAC VDD)
+        # Note: MCP4725 output is relative to its VDD
         # 12-bit DAC: 0-4095
-        # Value = (Voltage / 3.3) * 4096
+        # Value = (Voltage / VDD) * 4095
         
-        voltage = max(0.0, min(3.3, voltage))
-        raw_value = int((voltage / 3.3) * 4095)
+        voltage = max(0.0, min(config.DAC_VDD_V, voltage))
+        raw_value = int((voltage / config.DAC_VDD_V) * 4095)
         
         # Set the DAC
         try:

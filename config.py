@@ -14,9 +14,10 @@ TORQUE_SENSITIVITY = 0.010       # 10mV/Nm (calculated from 4.5V-0.5V over 400Nm
 
 # DAC (Motor Controller)
 MCP4725_ADDRESS = 0x62
+DAC_VDD_V = 4.5               # VIN voltage supplied to the DAC (defines the 4095 max raw value)
 MOTOR_IDLE_OUTPUT_V = 1.0     # 1.0V = Idle/Zero-assist baseline without triggering motor fault
 MOTOR_MIN_ASSIST_V = 1.5      # 1.5V = Physical kick-in voltage (Minimum throttle)
-MOTOR_MAX_OUTPUT_V = 3.3      # 3.3V = Maximum throttle (maxed out based on 3.3v rail)
+MOTOR_MAX_OUTPUT_V = 4.5      # 4.5V = Maximum throttle (maxed out based on new 4.5V logic rail)
 
 # GPIO (Cadence Sensor)
 # Using RPi.GPIO numbers (BCM mode)
