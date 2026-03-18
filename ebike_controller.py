@@ -83,13 +83,13 @@ class MotorController:
         if not self.connected:
             return
 
-        # Clamp voltage to safe limits (0 to 3.3V)
-        # Note: MCP4725 output is relative to its VDD (3.3V)
+        # Clamp voltage to safe limits (0 to DAC VDD)
+        # Note: MCP4725 output is relative to its VDD
         # 12-bit DAC: 0-4095
-        # Value = (Voltage / 3.3) * 4096
+        # Value = (Voltage / VDD) * 4095
         
-        voltage = max(0.0, min(3.3, voltage))
-        raw_value = int((voltage / 3.3) * 4095)
+        voltage = max(0.0, min(config.DAC_VDD_V, voltage))
+        raw_value = int((voltage / config.DAC_VDD_V) * 4095)
         
         # Set the DAC
         try:
@@ -256,6 +256,7 @@ def main():
     
     # State for smoothing
     smoothed_torque = 0.0
+    torque_history = []
     
     # Loop Logic
     loop_interval = 0.05 # 50ms loop
@@ -286,11 +287,16 @@ def main():
             if (time.time() - last_cadence_time) > timeout_threshold:
                 current_cadence_rpm = 0.0
 
-            # 2. APPLY SMOOTHING (Asymmetric)
+            # 2. LIME-BIKE STYLE ASYMMETRIC SMOOTHING (Peak Track & Hold)
+            # Lime bikes use a steep attack and a slow, continuous decay to completely eliminate dead-spots.
+            # We bypass the 'torque_history' list entirely for this.
+            
             if raw_torque > smoothed_torque:
-                smoothed_torque += (raw_torque - smoothed_torque) * config.SMOOTH_RISE_SPEED
+                # Fast response to new effort (Tracks peaks instantly)
+                smoothed_torque += (raw_torque - smoothed_torque) * 0.5 
             else:
-                smoothed_torque += (raw_torque - smoothed_torque) * config.SMOOTH_FALL_SPEED
+                # Very slow decay to 'hold' the peak over the dead spots of the pedal stroke
+                smoothed_torque += (raw_torque - smoothed_torque) * 0.015
             
             # Ensure torque doesn't drift negative
             smoothed_torque = max(0.0, smoothed_torque)
