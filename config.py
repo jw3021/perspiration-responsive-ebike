@@ -47,4 +47,4 @@ MAX_SPEED_KPH = 25.0        # Legal speed limit for assist
 
 # Assist Logic
 ASSIST_LEVEL_FACTOR = 1.0   # Multiplier for assist strength (Tune as needed)
-MAX_TORQUE_INPUT_NM = 60.0  # Cap input torque for calculations
+MAX_TORQUE_INPUT_NM = 35.0  # Cap input torque for calculations
