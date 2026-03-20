@@ -17,7 +17,20 @@ MCP4725_ADDRESS = 0x62
 DAC_VDD_V = 4.5               # VIN voltage supplied to the DAC (defines the 4095 max raw value)
 MOTOR_IDLE_OUTPUT_V = 1.0     # 1.0V = Idle/Zero-assist baseline without triggering motor fault
 MOTOR_MIN_ASSIST_V = 1.5      # 1.5V = Physical kick-in voltage (Minimum throttle)
-MOTOR_MAX_OUTPUT_V = 4.5      # 4.5V = Maximum throttle (maxed out based on new 4.5V logic rail)
+
+# --- POWER BANDS (IoT Ready) ---
+# Valid options: "LOW", "MEDIUM", "HIGH"
+# LOW    = Least power (Data collection / Normal riding)
+# MEDIUM = Medium power (Noticeable assist)
+# HIGH   = Full power (Sweat prediction / Maximum assist)
+CURRENT_POWER_BAND = "LOW"
+
+if CURRENT_POWER_BAND == "LOW":
+    MOTOR_MAX_OUTPUT_V = 2.5
+elif CURRENT_POWER_BAND == "MEDIUM":
+    MOTOR_MAX_OUTPUT_V = 3.5
+else:
+    MOTOR_MAX_OUTPUT_V = 4.5
 
 # GPIO (Cadence Sensor)
 # Using RPi.GPIO numbers (BCM mode)

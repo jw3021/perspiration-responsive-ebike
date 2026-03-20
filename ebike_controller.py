@@ -14,9 +14,12 @@ try:
 except ImportError:
     print("Error: config.py not found. Please ensure it exists in the same directory.")
     exit(1)
-
 import threading
-
+import web_server
+import hdrop_reader
+import csv
+import os
+from datetime import datetime
 # --- GLOBAL STATE ---
 current_speed_kph = 0.0
 last_cadence_time = 0
@@ -214,6 +217,40 @@ def setup_gpio():
             print(f"Failed to start high-speed thread: {e2}")
         return True # In polling mode
 
+class HDropManager(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.running = True
+        self.current_fluid_l = 0.0
+        self.current_sweat_rate_l_hr = 0.0
+        self.history = []  # List of tuples (timestamp, fluid_l)
+        
+    def run(self):
+        print("Initializing HDrop reader (Bluetooth / Android)...")
+        if not hdrop_reader.init_hdrop():
+            print("Warning: HDrop reader failed to initialize. Values will remain 0.0")
+            
+        while self.running:
+            try:
+                val = hdrop_reader.read_hdrop()
+                if val is not None:
+                    self.current_fluid_l = val
+                    now = time.time()
+                    self.history.append((now, val))
+                    
+                    # 2-Minute Sliding Window (120 seconds) for Sweat Rate
+                    self.history = [(t, v) for (t, v) in self.history if now - t <= 120.0]
+                    
+                    if len(self.history) >= 2:
+                        oldest_time, oldest_val = self.history[0]
+                        time_diff_hrs = (now - oldest_time) / 3600.0
+                        if time_diff_hrs > 0:
+                            self.current_sweat_rate_l_hr = (val - oldest_val) / time_diff_hrs
+            except Exception as e:
+                pass
+                
+            time.sleep(15) # Poll every 15 seconds
 
 # --- MAIN CONTROL LOOP ---
 
@@ -245,6 +282,20 @@ def main():
     # Initialize Serial Thread
     ca_reader = CycleAnalystReader()
     ca_reader.start()
+    
+    # Start HDrop Polling Thread
+    hdrop_manager = HDropManager()
+    hdrop_manager.start()
+
+    # Start Web Server Thread
+    def run_flask():
+        web_server.app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    csv_file = None
+    csv_writer = None
+    is_logging = False
     
     # Initialize GPIO and get polling mode state
     polling_mode = setup_gpio()
@@ -347,10 +398,39 @@ def main():
             # 4. OUTPUT
             motor.set_output(target_voltage)
             
-            # Debug Stats (Every ~1s)
-            # Using a counter
+            # Debug Stats & CSV Logging (Every ~1s)
             if (getattr(main, "counter", 0)) % 20 == 0:
-                print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f}", flush=True)
+                print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f} | Pwr: {config.CURRENT_POWER_BAND}", flush=True)
+                
+                # --- CSV LOGGING LOGIC ---
+                if web_server.ride_active and not is_logging:
+                    if not os.path.exists("ride_logs"):
+                        os.makedirs("ride_logs")
+                    filename = f"ride_logs/ride_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                    csv_file = open(filename, 'w', newline='')
+                    csv_writer = csv.writer(csv_file)
+                    csv_writer.writerow(["timestamp", "rpm", "speed_kph", "torque_nm", "voltage_out", "power_band", "fluid_loss_l", "sweat_rate_l_hr"])
+                    is_logging = True
+                    print(f"\n[IoT] STARTED RECORDING RIDE TO {filename}")
+                
+                elif not web_server.ride_active and is_logging:
+                    if csv_file:
+                        csv_file.close()
+                    is_logging = False
+                    print("\n[IoT] STOPPED RECORDING AND SAVED CSV")
+                
+                if is_logging and csv_writer:
+                    csv_writer.writerow([
+                        datetime.now().isoformat(),
+                        round(current_cadence_rpm, 1),
+                        round(current_speed_kph, 1),
+                        round(smoothed_torque, 1),
+                        round(target_voltage, 2),
+                        config.CURRENT_POWER_BAND,
+                        round(hdrop_manager.current_fluid_l, 4),
+                        round(hdrop_manager.current_sweat_rate_l_hr, 4)
+                    ])
+                    csv_file.flush() # Ensure it writes to SD card instantly
             setattr(main, "counter", getattr(main, "counter", 0) + 1)
 
             # Loop Sleep
