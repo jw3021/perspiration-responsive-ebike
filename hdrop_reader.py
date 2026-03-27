@@ -142,8 +142,8 @@ def ensure_hdrop_foreground(d):
         if pkg == HDROP_PACKAGE:
             return True
         else:
-            print(f"  [?] reported foreground app is '{pkg}' (will try reading anyway)")
-            # Return true to proceed with reading anyway
+            # Silencing the annoying UIAutomator package mis-read warning
+            # print(f"  [?] reported foreground app is '{pkg}' (will try reading anyway)")
             return True
     except Exception as e:
         print(f"  Could not check foreground app: {e}")
@@ -162,16 +162,10 @@ def launch_hdrop(d):
         return False
 
 
-def get_fluid_loss(d):
+def get_hdrop_metrics(d):
     """
-    Extract the fluid loss value from the hDrop app UI.
-
-    Scrapes all visible TextViews and looks for the "FLUID LOSS (L)"
-    label, then grabs the value that sits just before it in the
-    element list (the hDrop UI renders the number above the label).
-
-    Returns:
-        float: fluid loss in litres, or None if not found / dash shown
+    Extract the fluid loss and temperature values from the hDrop app UI.
+    Returns: dict {"fluid": float or None, "temp": float or None}
     """
     try:
         all_text = []
@@ -180,36 +174,50 @@ def get_fluid_loss(d):
             if text:
                 all_text.append(text)
 
-        # Look for the fluid loss label
+        fluid = None
+        temp = None
+
         for i, text in enumerate(all_text):
-            # Normalize whitespace and capitalization
             t = " ".join(text.upper().split())
+            
+            # Fluid Loss Look-up
             if "FLUID" in t and "LOSS" in t and ("L" in t or "(L)" in t):
-                # The numeric value appears just AFTER the label in the UX tree based on our debugging
                 if i < len(all_text) - 1:
                     raw_value = all_text[i + 1].strip()
-
-                    # Skip placeholder dashes
                     if raw_value in ("--", "-", "—", ""):
-                        return None
+                        fluid = 0.0
+                    else:
+                        clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
+                        if clean_val:
+                            try: fluid = float(clean_val)
+                            except ValueError: pass
+                            
+            # Temperature Look-up
+            # Note: The UI drops the literal string "31°C" in some cases.
+            if "°C" in t:
+                raw_value = text.strip()
+                clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
+                if clean_val:
+                    try: temp = float(clean_val)
+                    except ValueError: pass
+            
+            # Fallback if only the label "TEMP. SENSOR" is found. Note the value sits right ABOVE it (i - 1) in the UI tree!
+            elif "TEMP" in t and "SENSOR" in t:
+                if i > 0:
+                    raw_value = all_text[i - 1].strip()
+                    if raw_value in ("--", "-", "—", ""):
+                        temp = 0.0
+                    elif "°C" in raw_value.upper():
+                        clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
+                        if clean_val:
+                            try: temp = float(clean_val)
+                            except ValueError: pass
 
-                    # Clean the value in case it has weird characters
-                    clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
-                    if not clean_val:
-                        return None
-
-                    try:
-                        return float(clean_val)
-                    except ValueError:
-                        print(f"  Could not parse value: '{raw_value}' (cleaned: '{clean_val}')")
-                        return None
-
-        return None
+        return {"fluid": fluid, "temp": temp}
 
     except Exception as e:
         print(f"  Error reading UI: {e}")
-        return None
-
+        return {"fluid": None, "temp": None}
 
 def init_csv():
     """Create CSV log file with headers if it doesn't exist."""
@@ -265,23 +273,23 @@ def init_hdrop():
 
 def read_hdrop():
     """
-    Read the current fluid loss value from the hDrop app.
-    Returns float (litres) or None if unavailable.
+    Read the current fluid loss and temperature values from the hDrop app.
+    Returns dict: {"fluid": float, "temp": float} or Nones if unavailable.
     """
     global _device, _last_fluid_loss
 
     if _device is None:
-        return None
+        return {"fluid": None, "temp": None}
 
     if not ensure_hdrop_foreground(_device):
         # Try to bring it back
         if not launch_hdrop(_device):
-            return None
+            return {"fluid": None, "temp": None}
 
-    value = get_fluid_loss(_device)
-    if value is not None:
-        _last_fluid_loss = value
-    return value
+    metrics = get_hdrop_metrics(_device)
+    if metrics["fluid"] is not None:
+        _last_fluid_loss = metrics["fluid"]
+    return metrics
 
 
 def get_last_hdrop_value():
@@ -313,18 +321,21 @@ def main():
     try:
         while True:
             try:
-                value = read_hdrop()
+                metrics = read_hdrop()
+                value = metrics["fluid"]
+                tval = metrics["temp"]
 
                 if value is not None:
                     consecutive_errors = 0  # Reset error counter
 
+                    # Force endless printing in standalone mode so user sees it actively monitoring
+                    ts = datetime.now().strftime("%H:%M:%S")
+                    tstr = f"{tval:.1f} °C" if tval is not None else "--- °C"
+                    print(f"  [{ts}]  Fluid Loss: {value:.3f} L  |  Skin Temp: {tstr}")
+                    
                     if value != last_value:
-                        ts = datetime.now().strftime("%H:%M:%S")
-                        print(f"  [{ts}]  Fluid Loss: {value:.3f} L")
-
                         if LOG_TO_CSV:
                             log_to_csv(value)
-
                         last_value = value
                 else:
                     if last_value is not None:

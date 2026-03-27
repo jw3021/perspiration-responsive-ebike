@@ -61,3 +61,7 @@ MAX_SPEED_KPH = 25.0        # Legal speed limit for assist
 # Assist Logic
 ASSIST_LEVEL_FACTOR = 1.0   # Multiplier for assist strength (Tune as needed)
 MAX_TORQUE_INPUT_NM = 35.0  # Cap input torque for calculations
+
+# --- IOT CLOUD CONFIGURATION ---
+SUPABASE_URL = "https://ljjuacwtjcvqxrtqomrn.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqanVhY3d0amN2cXhydHFvbXJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTA5MDMsImV4cCI6MjA4OTU4NjkwM30.zmfCAMfbm8H2Zli5wbjGJEmkXkNy5UyKl0d3EQM-yzI"
