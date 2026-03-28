@@ -168,6 +168,12 @@ def get_hdrop_metrics(d):
     Returns: dict {"fluid": float or None, "temp": float or None}
     """
     try:
+        # --- AGGRESSIVE CACHE BUSTER ---
+        # Because we leave the phone screen mostly untouched, Android's UI Engine likes to get stuck caching the pixels!
+        # Sending a microscopic, silent "FOREGROUND" ping forces the exact XML Accessibility layer to violently update!
+        d.app_start(HDROP_PACKAGE, stop=False)
+        time.sleep(0.1)
+
         all_text = []
         for elem in d(className="android.widget.TextView"):
             text = elem.get_text()
@@ -176,12 +182,13 @@ def get_hdrop_metrics(d):
 
         fluid = None
         temp = None
+        sweat_rate = None
 
         for i, text in enumerate(all_text):
             t = " ".join(text.upper().split())
             
-            # Fluid Loss Look-up
-            if "FLUID" in t and "LOSS" in t and ("L" in t or "(L)" in t):
+            # Fluid Loss Look-up (Only take the very first one we find to bypass static history logs!)
+            if "FLUID" in t and "LOSS" in t and ("L" in t or "(L)" in t) and fluid is None:
                 if i < len(all_text) - 1:
                     raw_value = all_text[i + 1].strip()
                     if raw_value in ("--", "-", "—", ""):
@@ -190,6 +197,18 @@ def get_hdrop_metrics(d):
                         clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
                         if clean_val:
                             try: fluid = float(clean_val)
+                            except ValueError: pass
+                            
+            # Native Sweat Rate Look-up
+            if "SWEAT" in t and "RATE" in t and ("L/H" in t or "(L/H)" in t) and sweat_rate is None:
+                if i < len(all_text) - 1:
+                    raw_value = all_text[i + 1].strip()
+                    if raw_value in ("--", "-", "—", ""):
+                        sweat_rate = 0.0
+                    else:
+                        clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
+                        if clean_val:
+                            try: sweat_rate = float(clean_val)
                             except ValueError: pass
                             
             # Temperature Look-up
@@ -213,11 +232,11 @@ def get_hdrop_metrics(d):
                             try: temp = float(clean_val)
                             except ValueError: pass
 
-        return {"fluid": fluid, "temp": temp}
+        return {"fluid": fluid, "temp": temp, "sweat_rate": sweat_rate}
 
     except Exception as e:
         print(f"  Error reading UI: {e}")
-        return {"fluid": None, "temp": None}
+        return {"fluid": None, "temp": None, "sweat_rate": None}
 
 def init_csv():
     """Create CSV log file with headers if it doesn't exist."""
@@ -253,6 +272,14 @@ def init_hdrop():
     global _device
     print("\n--- hDrop Reader Init ---")
 
+    try:
+        print("  Aggressively hijacking ADB server with Root privileges...")
+        subprocess.run(["sudo", "adb", "kill-server"], capture_output=True)
+        subprocess.run(["sudo", "adb", "start-server"], capture_output=True)
+        time.sleep(2)  # Give the server a moment to recognize the phone
+    except Exception as e:
+        print(f"  Warning: Root ADB force-start failed: {e}")
+
     if not check_adb_available():
         return False
 
@@ -287,8 +314,19 @@ def read_hdrop():
             return {"fluid": None, "temp": None}
 
     metrics = get_hdrop_metrics(_device)
-    if metrics["fluid"] is not None:
-        _last_fluid_loss = metrics["fluid"]
+    if metrics.get("fluid") is not None:
+        _last_fluid_loss = metrics.get("fluid")
+        
+        # --- THE GHOST TOAST ---
+        # Inject our visual confirmation bubble into the Android OS!
+        try:
+            toast_str = f"✅ Pi Synced: {metrics.get('fluid', 0.0):.3f}L"
+            if metrics.get('sweat_rate') is not None:
+                toast_str += f" | {metrics.get('sweat_rate', 0.0):.2f} L/h"
+            _device.toast.show(toast_str, 1.5)
+        except Exception:
+            pass
+            
     return metrics
 
 

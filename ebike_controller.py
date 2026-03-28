@@ -229,6 +229,7 @@ class HDropManager(threading.Thread):
         self.current_skin_temp_c = None
         self.history = []  # List of tuples (timestamp, fluid_l)
         self.consecutive_errors = 0
+        self.is_cached = False
         
     def run(self):
         print("Initializing HDrop reader (Bluetooth / Android)...")
@@ -244,21 +245,44 @@ class HDropManager(threading.Thread):
                     self.current_skin_temp_c = metrics.get("temp")
                 
                 if val is not None:
+                    self.is_cached = False
                     self.consecutive_errors = 0
                     self.current_fluid_l = val
                     now = time.time()
                     self.history.append((now, val))
                     
-                    # 2-Minute Sliding Window (120 seconds) for Sweat Rate
+                    # --- RESTORED MATHEMATICAL SWEAT RATE LOOP --- 
                     self.history = [(t, v) for (t, v) in self.history if now - t <= 120.0]
-                    
                     if len(self.history) >= 2:
                         oldest_time, oldest_val = self.history[0]
                         time_diff_hrs = (now - oldest_time) / 3600.0
                         if time_diff_hrs > 0:
                             self.current_sweat_rate_l_hr = (val - oldest_val) / time_diff_hrs
+                    # --- FROZEN ANDROID UI DETECTOR ---
+                    # If the Android OS Accessibility Service silently crashes, the physical screen will update 
+                    # but the background XML Engine will hand us the exact same number infinitely without throwing an error!
+                    # If we receive the EXACT SAME NUMBER for 20 straight readings (5 minutes of riding), 
+                    # we mathematically assume the phone's engine froze and violently reboot it!
+                    
+                    if not hasattr(self, 'frozen_counter'):
+                        self.frozen_counter = 0
+                        self.last_frozen_val = None
+                        
+                    if self.last_frozen_val == val:
+                        self.frozen_counter += 1
+                    else:
+                        self.frozen_counter = 0
+                        self.last_frozen_val = val
+                        
+                    if self.frozen_counter >= 20: # 5 minutes
+                        print("\n[HDrop] WARNING: Android Accessibility Service has likely silently frozen!")
+                        print("[HDrop] Commencing violent forced reset of Android USB ATX servers...")
+                        hdrop_reader.init_hdrop()
+                        self.frozen_counter = 0  # Reset so it doesn't instantly crash again
+                            
                 else:
                     self.consecutive_errors += 1
+                    self.is_cached = True
                     # If we miss 2 readings (30 seconds), nullify the data so ML doesn't learn fake zeros
                     if self.consecutive_errors >= 2:
                         self.current_fluid_l = None
@@ -273,6 +297,7 @@ class HDropManager(threading.Thread):
                         
             except Exception as e:
                 self.consecutive_errors += 1
+                self.is_cached = True
                 
             time.sleep(15) # Poll every 15 seconds
 
@@ -485,7 +510,8 @@ def main():
             
             # Debug Stats & CSV Logging (Every ~1s)
             if (getattr(main, "counter", 0)) % 20 == 0:
-                fluid_display = f"{hdrop_manager.current_fluid_l:.3f}L" if hdrop_manager.current_fluid_l is not None else "None"
+                cache_flag = "*" if hdrop_manager.is_cached else ""
+                fluid_display = f"{hdrop_manager.current_fluid_l:.3f}L{cache_flag}" if hdrop_manager.current_fluid_l is not None else "None"
                 skin_display = f"{hdrop_manager.current_skin_temp_c:.1f}°C" if hdrop_manager.current_skin_temp_c is not None else "None"
                 print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f} | Pwr: {config.CURRENT_POWER_BAND} | Sweat: {fluid_display} | Skin: {skin_display}", flush=True)
                 
