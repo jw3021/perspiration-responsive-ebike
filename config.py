@@ -17,7 +17,20 @@ MCP4725_ADDRESS = 0x62
 DAC_VDD_V = 4.5               # VIN voltage supplied to the DAC (defines the 4095 max raw value)
 MOTOR_IDLE_OUTPUT_V = 1.0     # 1.0V = Idle/Zero-assist baseline without triggering motor fault
 MOTOR_MIN_ASSIST_V = 1.5      # 1.5V = Physical kick-in voltage (Minimum throttle)
-MOTOR_MAX_OUTPUT_V = 4.5      # 4.5V = Maximum throttle (maxed out based on new 4.5V logic rail)
+
+# --- POWER BANDS (IoT Ready) ---
+# Valid options: "LOW", "MEDIUM", "HIGH"
+# LOW    = Least power (Data collection / Normal riding)
+# MEDIUM = Medium power (Noticeable assist)
+# HIGH   = Full power (Sweat prediction / Maximum assist)
+CURRENT_POWER_BAND = "LOW"
+
+if CURRENT_POWER_BAND == "LOW":
+    MOTOR_MAX_OUTPUT_V = 2.5
+elif CURRENT_POWER_BAND == "MEDIUM":
+    MOTOR_MAX_OUTPUT_V = 3.5
+else:
+    MOTOR_MAX_OUTPUT_V = 4.5
 
 # GPIO (Cadence Sensor)
 # Using RPi.GPIO numbers (BCM mode)
@@ -48,3 +61,7 @@ MAX_SPEED_KPH = 25.0        # Legal speed limit for assist
 # Assist Logic
 ASSIST_LEVEL_FACTOR = 1.0   # Multiplier for assist strength (Tune as needed)
 MAX_TORQUE_INPUT_NM = 35.0  # Cap input torque for calculations
+
+# --- IOT CLOUD CONFIGURATION ---
+SUPABASE_URL = "https://ljjuacwtjcvqxrtqomrn.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqanVhY3d0amN2cXhydHFvbXJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTA5MDMsImV4cCI6MjA4OTU4NjkwM30.zmfCAMfbm8H2Zli5wbjGJEmkXkNy5UyKl0d3EQM-yzI"

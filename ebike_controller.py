@@ -14,9 +14,15 @@ try:
 except ImportError:
     print("Error: config.py not found. Please ensure it exists in the same directory.")
     exit(1)
-
 import threading
-
+import web_server
+import hdrop_reader
+import csv
+import os
+from datetime import datetime
+import adafruit_ahtx0
+import queue
+import email_notifier
 # --- GLOBAL STATE ---
 current_speed_kph = 0.0
 last_cadence_time = 0
@@ -214,6 +220,143 @@ def setup_gpio():
             print(f"Failed to start high-speed thread: {e2}")
         return True # In polling mode
 
+class HDropManager(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.running = True
+        self.current_fluid_l = None
+        self.current_sweat_rate_l_hr = None
+        self.current_skin_temp_c = None
+        self.history = []  # List of tuples (timestamp, fluid_l)
+        self.consecutive_errors = 0
+        self.is_cached = False
+        self.frozen_counter = 0
+        self.last_frozen_val = None
+        
+    def run(self):
+        print("Initializing HDrop reader (Bluetooth / Android)...")
+        if not hdrop_reader.init_hdrop():
+            print("Warning: HDrop reader failed to initialize. Values will remain None")
+            
+        while self.running:
+            try:
+                metrics = hdrop_reader.read_hdrop()
+                val = metrics.get("fluid")
+                
+                if metrics.get("temp") is not None:
+                    self.current_skin_temp_c = metrics.get("temp")
+                
+                if val is not None:
+                    self.is_cached = False
+                    self.consecutive_errors = 0
+                    self.current_fluid_l = val
+                    now = time.time()
+
+                    # Prefer the native sweat rate from the HDrop app if available,
+                    # otherwise fall back to the Pi's own mathematical calculation.
+                    native_sweat_rate = metrics.get("sweat_rate")
+                    if native_sweat_rate is not None:
+                        self.current_sweat_rate_l_hr = native_sweat_rate
+                    else:
+                        # --- DISCRETE MATHEMATICAL SWEAT RATE FALLBACK ---
+                        if not hasattr(self, 'last_discrete_val'):
+                            self.last_discrete_val = val
+                            self.last_discrete_time = now
+                            self.current_sweat_rate_l_hr = 0.0
+                            email_notifier.fire_alert("🚴 Pi hDrop Online!", f"The Raspberry Pi is successfully reading from the hDrop Android app!\n\nStarting Fluid Loss: {val}L\nSkin Temp: {self.current_skin_temp_c}°C\nSweat Rate: {self.current_sweat_rate_l_hr}L/h")
+
+                        # Only update the Sweat Rate mathematically if the physical Fluid Loss leaps up!
+                        if val > self.last_discrete_val:
+                            time_diff_hrs = (now - self.last_discrete_time) / 3600.0
+                            if time_diff_hrs > 0:
+                                self.current_sweat_rate_l_hr = (val - self.last_discrete_val) / time_diff_hrs
+                            
+                            # Fire an email alert!
+                            email_notifier.fire_alert(f"💧 hDrop Update: {val}L", f"Your fluid loss physically leaped up!\n\nNew Fluid: {val}L\nCalculated Sweat Rate: {self.current_sweat_rate_l_hr:.2f}L/h\nSkin Temp: {self.current_skin_temp_c}°C")
+                            
+                            # Lock the new anchor point for the next leap
+                            self.last_discrete_val = val
+                            self.last_discrete_time = now
+                        
+                        # Cooldown detection: If 15 minutes pass with absolutely ZERO sweat, zero out the rate
+                        elif (now - self.last_discrete_time) > 900.0:
+                            self.current_sweat_rate_l_hr = 0.0
+
+                    # --- FROZEN ANDROID UI DETECTOR ---
+                    # If the Android OS Accessibility Service silently crashes, the physical screen will update
+                    # but the background XML Engine will hand us the exact same number infinitely without throwing an error!
+                    # If we receive the EXACT SAME NUMBER for 20 straight readings (5 minutes of riding),
+                    # we mathematically assume the phone's engine froze and violently reboot it!
+                    # Skip the check for 0.0 (the "--" placeholder at ride start) to avoid spurious reboots.
+                    if val != 0.0:
+                        if self.last_frozen_val == val:
+                            self.frozen_counter += 1
+                        else:
+                            self.frozen_counter = 0
+                            self.last_frozen_val = val
+
+                        if self.frozen_counter >= 20: # 5 minutes
+                            print("\n[HDrop] WARNING: Android Accessibility Service has likely silently frozen!")
+                            print("[HDrop] Commencing violent forced reset of Android USB ATX servers...")
+                            hdrop_reader.init_hdrop()
+                            self.frozen_counter = 0  # Reset so it doesn't instantly crash again
+
+                else:
+                    self.consecutive_errors += 1
+                    self.is_cached = True
+                    # If we miss 4 readings (60 seconds), nullify the data so ML doesn't learn fake zeros
+                    if self.consecutive_errors >= 4:
+                        self.current_fluid_l = None
+                        self.current_sweat_rate_l_hr = None
+                        self.current_skin_temp_c = None
+
+                    # If we miss 8 readings (120 seconds), aggressively try to reboot the USB/ADB connection
+                    if self.consecutive_errors >= 8:
+                        print("[HDrop] Connection lost! Attempting aggressive reboot...")
+                        hdrop_reader.init_hdrop()
+                        self.consecutive_errors = 0 # Reset so it doesn't span-reboot every 15s
+                        
+            except Exception as e:
+                self.consecutive_errors += 1
+                self.is_cached = True
+                
+            time.sleep(15) # Poll every 15 seconds
+
+class CloudSyncManager(threading.Thread):
+    def __init__(self, upload_queue):
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.running = True
+        self.queue = upload_queue
+        self.supabase = None
+        try:
+            from supabase import create_client
+            if hasattr(config, 'SUPABASE_URL') and hasattr(config, 'SUPABASE_KEY'):
+                self.supabase = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
+                print("[CloudSync] Connected to Supabase API!")
+        except Exception as e:
+            print(f"[CloudSync] Init Warning: Supabase missing or misconfigured: {e}")
+            
+    def run(self):
+        while self.running:
+            batch = []
+            try:
+                # Wait up to 3 seconds for a new row from the controller loop
+                item = self.queue.get(timeout=3.0)
+                batch.append(item)
+                
+                # Grab any other items immediately available to bulk upload efficiently
+                while not self.queue.empty() and len(batch) < 10:
+                    batch.append(self.queue.get_nowait())
+                    
+                if self.supabase is not None and len(batch) > 0:
+                    self.supabase.table("ride_metrics_v2").insert(batch).execute()
+                    
+            except queue.Empty:
+                pass # Normal wait timeout
+            except Exception as e:
+                print(f"[Supabase Upload Error] {e}")
 
 # --- MAIN CONTROL LOOP ---
 
@@ -241,10 +384,41 @@ def main():
     except ValueError as e:
         print(f"Device Init Error: {e}")
         return
+        
+    try:
+        aht_sensor = adafruit_ahtx0.AHTx0(i2c)
+        print("AHT25 Temp/Humid Sensor initialized.")
+    except Exception as e:
+        print(f"AHT25 Init Error: {e}. Temp/Humid will log as 0.0")
+        aht_sensor = None
+    
+    current_temp_c = 0.0
+    current_humid_pct = 0.0
+    last_aht_read_time = 0
     
     # Initialize Serial Thread
     ca_reader = CycleAnalystReader()
     ca_reader.start()
+    
+    # Start HDrop Polling Thread
+    hdrop_manager = HDropManager()
+    hdrop_manager.start()
+
+    # Start Cloud Sync Thread
+    cloud_queue = queue.Queue()
+    cloud_manager = CloudSyncManager(cloud_queue)
+    cloud_manager.start()
+
+    # Start Web Server Thread
+    def run_flask():
+        web_server.app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    csv_file = None
+    csv_writer = None
+    is_logging = False
+    current_ride_id = None
     
     # Initialize GPIO and get polling mode state
     polling_mode = setup_gpio()
@@ -347,10 +521,73 @@ def main():
             # 4. OUTPUT
             motor.set_output(target_voltage)
             
-            # Debug Stats (Every ~1s)
-            # Using a counter
+            # --- Slow Sensor Polling (Every 10s) ---
+            if aht_sensor is not None and (time.time() - last_aht_read_time) > 10.0:
+                try:
+                    current_temp_c = aht_sensor.temperature
+                    current_humid_pct = aht_sensor.relative_humidity
+                except Exception:
+                    pass # Ignore random I2C dropouts from electrical noise
+                last_aht_read_time = time.time()
+            
+            # Debug Stats & CSV Logging (Every ~1s)
             if (getattr(main, "counter", 0)) % 20 == 0:
-                print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f}", flush=True)
+                cache_flag = "*" if hdrop_manager.is_cached else ""
+                fluid_display = f"{hdrop_manager.current_fluid_l:.3f}L{cache_flag}" if hdrop_manager.current_fluid_l is not None else "None"
+                rate_display = f"{hdrop_manager.current_sweat_rate_l_hr:.3f}L/h{cache_flag}" if hdrop_manager.current_sweat_rate_l_hr is not None else "None"
+                skin_display = f"{hdrop_manager.current_skin_temp_c:.1f}°C" if hdrop_manager.current_skin_temp_c is not None else "None"
+                print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f} | Pwr: {config.CURRENT_POWER_BAND} | Fluid: {fluid_display} | Rate: {rate_display} | Skin: {skin_display}", flush=True)
+                
+                # --- CSV LOGGING LOGIC ---
+                if web_server.ride_active and not is_logging:
+                    if not os.path.exists("ride_logs"):
+                        os.makedirs("ride_logs")
+                    
+                    # Generate a perfectly unique ride ID for Machine Learning sync
+                    current_ride_id = "RIDE_" + datetime.now().strftime('%Y%m%d_%H%M%S')
+                    web_server.last_ride_id = current_ride_id
+                    
+                    filename = f"ride_logs/{current_ride_id}.csv"
+                    csv_file = open(filename, 'w', newline='')
+                    csv_writer = csv.writer(csv_file)
+                    csv_writer.writerow(["ride_id", "timestamp", "rpm", "speed_kph", "torque_nm", "voltage_out", "power_band", "temp_c", "humidity_pct", "fluid_loss_l", "sweat_rate_l_hr", "skin_temp_c"])
+                    is_logging = True
+                    print(f"\n[IoT] STARTED RECORDING {current_ride_id} TO {filename}")
+                
+                elif not web_server.ride_active and is_logging:
+                    if csv_file:
+                        csv_file.close()
+                    is_logging = False
+                    current_ride_id = None
+                    print("\n[IoT] STOPPED RECORDING AND SAVED CSV")
+                
+                if is_logging and csv_writer:
+                    row_data = {
+                        "ride_id": current_ride_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "rpm": round(current_cadence_rpm, 1),
+                        "speed_kph": round(current_speed_kph, 1),
+                        "torque_nm": round(smoothed_torque, 1),
+                        "voltage_out": round(target_voltage, 2),
+                        "power_band": config.CURRENT_POWER_BAND,
+                        "temp_c": round(current_temp_c, 2),
+                        "humidity_pct": round(current_humid_pct, 2),
+                        "fluid_loss_l": round(hdrop_manager.current_fluid_l, 4) if hdrop_manager.current_fluid_l is not None else None,
+                        "sweat_rate_l_hr": round(hdrop_manager.current_sweat_rate_l_hr, 4) if hdrop_manager.current_sweat_rate_l_hr is not None else None,
+                        "skin_temp_c": round(hdrop_manager.current_skin_temp_c, 2) if hdrop_manager.current_skin_temp_c is not None else None
+                    }
+                    
+                    csv_writer.writerow([
+                        row_data["ride_id"], row_data["timestamp"], row_data["rpm"], 
+                        row_data["speed_kph"], row_data["torque_nm"], row_data["voltage_out"], 
+                        row_data["power_band"], row_data["temp_c"], row_data["humidity_pct"], 
+                        row_data["fluid_loss_l"], row_data["sweat_rate_l_hr"], row_data["skin_temp_c"]
+                    ])
+                    csv_file.flush() # Ensure it writes to SD card instantly
+                    
+                    # Fire into the cloud queue (won't block this 50ms loop)
+                    cloud_queue.put(row_data)
+                    csv_file.flush() # Ensure it writes to SD card instantly
             setattr(main, "counter", getattr(main, "counter", 0) + 1)
 
             # Loop Sleep

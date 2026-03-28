@@ -142,8 +142,8 @@ def ensure_hdrop_foreground(d):
         if pkg == HDROP_PACKAGE:
             return True
         else:
-            print(f"  [?] reported foreground app is '{pkg}' (will try reading anyway)")
-            # Return true to proceed with reading anyway
+            # Silencing the annoying UIAutomator package mis-read warning
+            # print(f"  [?] reported foreground app is '{pkg}' (will try reading anyway)")
             return True
     except Exception as e:
         print(f"  Could not check foreground app: {e}")
@@ -162,54 +162,85 @@ def launch_hdrop(d):
         return False
 
 
-def get_fluid_loss(d):
+def get_hdrop_metrics(d):
     """
-    Extract the fluid loss value from the hDrop app UI.
-
-    Scrapes all visible TextViews and looks for the "FLUID LOSS (L)"
-    label, then grabs the value that sits just before it in the
-    element list (the hDrop UI renders the number above the label).
-
-    Returns:
-        float: fluid loss in litres, or None if not found / dash shown
+    Extract the fluid loss and temperature values from the hDrop app UI.
+    Returns: dict {"fluid": float or None, "temp": float or None}
     """
     try:
+        # Explicit call to violently force the ATX agent to rebuild its internal state map 
+        # from the active Android layout! This prevents iterative element queries from returning stale cache.
+        try:
+            d.dump_hierarchy(compressed=True, pretty=False)
+        except Exception:
+            pass
+
         all_text = []
         for elem in d(className="android.widget.TextView"):
             text = elem.get_text()
             if text:
                 all_text.append(text)
 
-        # Look for the fluid loss label
+        fluids = []
+        temps = []
+        sweat_rates = []
+
         for i, text in enumerate(all_text):
-            # Normalize whitespace and capitalization
             t = " ".join(text.upper().split())
+            
+            # Fluid Loss Look-up
             if "FLUID" in t and "LOSS" in t and ("L" in t or "(L)" in t):
-                # The numeric value appears just AFTER the label in the UX tree based on our debugging
                 if i < len(all_text) - 1:
                     raw_value = all_text[i + 1].strip()
-
-                    # Skip placeholder dashes
                     if raw_value in ("--", "-", "—", ""):
-                        return None
+                        fluids.append(0.0)
+                    else:
+                        clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
+                        if clean_val:
+                            try: fluids.append(float(clean_val))
+                            except ValueError: pass
+                            
+            # Native Sweat Rate Look-up
+            if "SWEAT" in t and "RATE" in t and ("L/H" in t or "(L/H)" in t):
+                if i < len(all_text) - 1:
+                    raw_value = all_text[i + 1].strip()
+                    if raw_value in ("--", "-", "—", ""):
+                        sweat_rates.append(0.0)
+                    else:
+                        clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
+                        if clean_val:
+                            try: sweat_rates.append(float(clean_val))
+                            except ValueError: pass
+                            
+            # Temperature Look-up
+            if "°C" in t:
+                raw_value = text.strip()
+                clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
+                if clean_val:
+                    try: temps.append(float(clean_val))
+                    except ValueError: pass
+            
+            # Fallback if only the label "TEMP. SENSOR" is found
+            elif "TEMP" in t and "SENSOR" in t:
+                if i > 0:
+                    raw_value = all_text[i - 1].strip()
+                    if raw_value in ("--", "-", "—", ""):
+                        temps.append(0.0)
+                    elif "°C" in raw_value.upper():
+                        clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
+                        if clean_val:
+                            try: temps.append(float(clean_val))
+                            except ValueError: pass
 
-                    # Clean the value in case it has weird characters
-                    clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
-                    if not clean_val:
-                        return None
+        fluid = max(fluids) if fluids else None
+        temp = max(temps) if temps else None
+        sweat_rate = max(sweat_rates) if sweat_rates else None
 
-                    try:
-                        return float(clean_val)
-                    except ValueError:
-                        print(f"  Could not parse value: '{raw_value}' (cleaned: '{clean_val}')")
-                        return None
-
-        return None
+        return {"fluid": fluid, "temp": temp, "sweat_rate": sweat_rate}
 
     except Exception as e:
         print(f"  Error reading UI: {e}")
-        return None
-
+        return {"fluid": None, "temp": None, "sweat_rate": None}
 
 def init_csv():
     """Create CSV log file with headers if it doesn't exist."""
@@ -245,6 +276,14 @@ def init_hdrop():
     global _device
     print("\n--- hDrop Reader Init ---")
 
+    try:
+        print("  Aggressively hijacking ADB server with Root privileges...")
+        subprocess.run(["sudo", "adb", "kill-server"], capture_output=True)
+        subprocess.run(["sudo", "adb", "start-server"], capture_output=True)
+        time.sleep(2)  # Give the server a moment to recognize the phone
+    except Exception as e:
+        print(f"  Warning: Root ADB force-start failed: {e}")
+
     if not check_adb_available():
         return False
 
@@ -265,23 +304,34 @@ def init_hdrop():
 
 def read_hdrop():
     """
-    Read the current fluid loss value from the hDrop app.
-    Returns float (litres) or None if unavailable.
+    Read the current fluid loss and temperature values from the hDrop app.
+    Returns dict: {"fluid": float, "temp": float} or Nones if unavailable.
     """
     global _device, _last_fluid_loss
 
     if _device is None:
-        return None
+        return {"fluid": None, "temp": None, "sweat_rate": None}
 
     if not ensure_hdrop_foreground(_device):
         # Try to bring it back
         if not launch_hdrop(_device):
-            return None
+            return {"fluid": None, "temp": None, "sweat_rate": None}
 
-    value = get_fluid_loss(_device)
-    if value is not None:
-        _last_fluid_loss = value
-    return value
+    metrics = get_hdrop_metrics(_device)
+    if metrics.get("fluid") is not None:
+        _last_fluid_loss = metrics.get("fluid")
+        
+        # --- THE GHOST TOAST ---
+        # Inject our visual confirmation bubble into the Android OS!
+        try:
+            toast_str = f"✅ Pi Synced: {metrics.get('fluid', 0.0):.3f}L"
+            if metrics.get('sweat_rate') is not None:
+                toast_str += f" | {metrics.get('sweat_rate', 0.0):.2f} L/h"
+            _device.toast.show(toast_str, 1.5)
+        except Exception:
+            pass
+            
+    return metrics
 
 
 def get_last_hdrop_value():
@@ -313,18 +363,21 @@ def main():
     try:
         while True:
             try:
-                value = read_hdrop()
+                metrics = read_hdrop()
+                value = metrics["fluid"]
+                tval = metrics["temp"]
 
                 if value is not None:
                     consecutive_errors = 0  # Reset error counter
 
+                    # Force endless printing in standalone mode so user sees it actively monitoring
+                    ts = datetime.now().strftime("%H:%M:%S")
+                    tstr = f"{tval:.1f} °C" if tval is not None else "--- °C"
+                    print(f"  [{ts}]  Fluid Loss: {value:.3f} L  |  Skin Temp: {tstr}")
+                    
                     if value != last_value:
-                        ts = datetime.now().strftime("%H:%M:%S")
-                        print(f"  [{ts}]  Fluid Loss: {value:.3f} L")
-
                         if LOG_TO_CSV:
                             log_to_csv(value)
-
                         last_value = value
                 else:
                     if last_value is not None:
