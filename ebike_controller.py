@@ -22,6 +22,7 @@ import os
 from datetime import datetime
 import adafruit_ahtx0
 import queue
+import email_notifier
 # --- GLOBAL STATE ---
 current_speed_kph = 0.0
 last_cadence_time = 0
@@ -230,6 +231,8 @@ class HDropManager(threading.Thread):
         self.history = []  # List of tuples (timestamp, fluid_l)
         self.consecutive_errors = 0
         self.is_cached = False
+        self.frozen_counter = 0
+        self.last_frozen_val = None
         
     def run(self):
         print("Initializing HDrop reader (Bluetooth / Android)...")
@@ -249,48 +252,67 @@ class HDropManager(threading.Thread):
                     self.consecutive_errors = 0
                     self.current_fluid_l = val
                     now = time.time()
-                    self.history.append((now, val))
-                    
-                    # --- RESTORED MATHEMATICAL SWEAT RATE LOOP --- 
-                    self.history = [(t, v) for (t, v) in self.history if now - t <= 120.0]
-                    if len(self.history) >= 2:
-                        oldest_time, oldest_val = self.history[0]
-                        time_diff_hrs = (now - oldest_time) / 3600.0
-                        if time_diff_hrs > 0:
-                            self.current_sweat_rate_l_hr = (val - oldest_val) / time_diff_hrs
-                    # --- FROZEN ANDROID UI DETECTOR ---
-                    # If the Android OS Accessibility Service silently crashes, the physical screen will update 
-                    # but the background XML Engine will hand us the exact same number infinitely without throwing an error!
-                    # If we receive the EXACT SAME NUMBER for 20 straight readings (5 minutes of riding), 
-                    # we mathematically assume the phone's engine froze and violently reboot it!
-                    
-                    if not hasattr(self, 'frozen_counter'):
-                        self.frozen_counter = 0
-                        self.last_frozen_val = None
-                        
-                    if self.last_frozen_val == val:
-                        self.frozen_counter += 1
+
+                    # Prefer the native sweat rate from the HDrop app if available,
+                    # otherwise fall back to the Pi's own mathematical calculation.
+                    native_sweat_rate = metrics.get("sweat_rate")
+                    if native_sweat_rate is not None:
+                        self.current_sweat_rate_l_hr = native_sweat_rate
                     else:
-                        self.frozen_counter = 0
-                        self.last_frozen_val = val
-                        
-                    if self.frozen_counter >= 20: # 5 minutes
-                        print("\n[HDrop] WARNING: Android Accessibility Service has likely silently frozen!")
-                        print("[HDrop] Commencing violent forced reset of Android USB ATX servers...")
-                        hdrop_reader.init_hdrop()
-                        self.frozen_counter = 0  # Reset so it doesn't instantly crash again
+                        # --- DISCRETE MATHEMATICAL SWEAT RATE FALLBACK ---
+                        if not hasattr(self, 'last_discrete_val'):
+                            self.last_discrete_val = val
+                            self.last_discrete_time = now
+                            self.current_sweat_rate_l_hr = 0.0
+                            email_notifier.fire_alert("🚴 Pi hDrop Online!", f"The Raspberry Pi is successfully reading from the hDrop Android app!\n\nStarting Fluid Loss: {val}L\nSkin Temp: {self.current_skin_temp_c}°C\nSweat Rate: {self.current_sweat_rate_l_hr}L/h")
+
+                        # Only update the Sweat Rate mathematically if the physical Fluid Loss leaps up!
+                        if val > self.last_discrete_val:
+                            time_diff_hrs = (now - self.last_discrete_time) / 3600.0
+                            if time_diff_hrs > 0:
+                                self.current_sweat_rate_l_hr = (val - self.last_discrete_val) / time_diff_hrs
                             
+                            # Fire an email alert!
+                            email_notifier.fire_alert(f"💧 hDrop Update: {val}L", f"Your fluid loss physically leaped up!\n\nNew Fluid: {val}L\nCalculated Sweat Rate: {self.current_sweat_rate_l_hr:.2f}L/h\nSkin Temp: {self.current_skin_temp_c}°C")
+                            
+                            # Lock the new anchor point for the next leap
+                            self.last_discrete_val = val
+                            self.last_discrete_time = now
+                        
+                        # Cooldown detection: If 15 minutes pass with absolutely ZERO sweat, zero out the rate
+                        elif (now - self.last_discrete_time) > 900.0:
+                            self.current_sweat_rate_l_hr = 0.0
+
+                    # --- FROZEN ANDROID UI DETECTOR ---
+                    # If the Android OS Accessibility Service silently crashes, the physical screen will update
+                    # but the background XML Engine will hand us the exact same number infinitely without throwing an error!
+                    # If we receive the EXACT SAME NUMBER for 20 straight readings (5 minutes of riding),
+                    # we mathematically assume the phone's engine froze and violently reboot it!
+                    # Skip the check for 0.0 (the "--" placeholder at ride start) to avoid spurious reboots.
+                    if val != 0.0:
+                        if self.last_frozen_val == val:
+                            self.frozen_counter += 1
+                        else:
+                            self.frozen_counter = 0
+                            self.last_frozen_val = val
+
+                        if self.frozen_counter >= 20: # 5 minutes
+                            print("\n[HDrop] WARNING: Android Accessibility Service has likely silently frozen!")
+                            print("[HDrop] Commencing violent forced reset of Android USB ATX servers...")
+                            hdrop_reader.init_hdrop()
+                            self.frozen_counter = 0  # Reset so it doesn't instantly crash again
+
                 else:
                     self.consecutive_errors += 1
                     self.is_cached = True
-                    # If we miss 2 readings (30 seconds), nullify the data so ML doesn't learn fake zeros
-                    if self.consecutive_errors >= 2:
+                    # If we miss 4 readings (60 seconds), nullify the data so ML doesn't learn fake zeros
+                    if self.consecutive_errors >= 4:
                         self.current_fluid_l = None
                         self.current_sweat_rate_l_hr = None
                         self.current_skin_temp_c = None
-                        
-                    # If we miss 4 readings (60 seconds), aggressively try to reboot the USB/ADB connection
-                    if self.consecutive_errors >= 4:
+
+                    # If we miss 8 readings (120 seconds), aggressively try to reboot the USB/ADB connection
+                    if self.consecutive_errors >= 8:
                         print("[HDrop] Connection lost! Attempting aggressive reboot...")
                         hdrop_reader.init_hdrop()
                         self.consecutive_errors = 0 # Reset so it doesn't span-reboot every 15s
@@ -512,8 +534,9 @@ def main():
             if (getattr(main, "counter", 0)) % 20 == 0:
                 cache_flag = "*" if hdrop_manager.is_cached else ""
                 fluid_display = f"{hdrop_manager.current_fluid_l:.3f}L{cache_flag}" if hdrop_manager.current_fluid_l is not None else "None"
+                rate_display = f"{hdrop_manager.current_sweat_rate_l_hr:.3f}L/h{cache_flag}" if hdrop_manager.current_sweat_rate_l_hr is not None else "None"
                 skin_display = f"{hdrop_manager.current_skin_temp_c:.1f}°C" if hdrop_manager.current_skin_temp_c is not None else "None"
-                print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f} | Pwr: {config.CURRENT_POWER_BAND} | Sweat: {fluid_display} | Skin: {skin_display}", flush=True)
+                print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f} | Pwr: {config.CURRENT_POWER_BAND} | Fluid: {fluid_display} | Rate: {rate_display} | Skin: {skin_display}", flush=True)
                 
                 # --- CSV LOGGING LOGIC ---
                 if web_server.ride_active and not is_logging:

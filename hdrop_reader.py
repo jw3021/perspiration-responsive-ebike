@@ -168,11 +168,12 @@ def get_hdrop_metrics(d):
     Returns: dict {"fluid": float or None, "temp": float or None}
     """
     try:
-        # --- AGGRESSIVE CACHE BUSTER ---
-        # Because we leave the phone screen mostly untouched, Android's UI Engine likes to get stuck caching the pixels!
-        # Sending a microscopic, silent "FOREGROUND" ping forces the exact XML Accessibility layer to violently update!
-        d.app_start(HDROP_PACKAGE, stop=False)
-        time.sleep(0.1)
+        # Explicit call to violently force the ATX agent to rebuild its internal state map 
+        # from the active Android layout! This prevents iterative element queries from returning stale cache.
+        try:
+            d.dump_hierarchy(compressed=True, pretty=False)
+        except Exception:
+            pass
 
         all_text = []
         for elem in d(className="android.widget.TextView"):
@@ -180,57 +181,60 @@ def get_hdrop_metrics(d):
             if text:
                 all_text.append(text)
 
-        fluid = None
-        temp = None
-        sweat_rate = None
+        fluids = []
+        temps = []
+        sweat_rates = []
 
         for i, text in enumerate(all_text):
             t = " ".join(text.upper().split())
             
-            # Fluid Loss Look-up (Only take the very first one we find to bypass static history logs!)
-            if "FLUID" in t and "LOSS" in t and ("L" in t or "(L)" in t) and fluid is None:
+            # Fluid Loss Look-up
+            if "FLUID" in t and "LOSS" in t and ("L" in t or "(L)" in t):
                 if i < len(all_text) - 1:
                     raw_value = all_text[i + 1].strip()
                     if raw_value in ("--", "-", "—", ""):
-                        fluid = 0.0
+                        fluids.append(0.0)
                     else:
                         clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
                         if clean_val:
-                            try: fluid = float(clean_val)
+                            try: fluids.append(float(clean_val))
                             except ValueError: pass
                             
             # Native Sweat Rate Look-up
-            if "SWEAT" in t and "RATE" in t and ("L/H" in t or "(L/H)" in t) and sweat_rate is None:
+            if "SWEAT" in t and "RATE" in t and ("L/H" in t or "(L/H)" in t):
                 if i < len(all_text) - 1:
                     raw_value = all_text[i + 1].strip()
                     if raw_value in ("--", "-", "—", ""):
-                        sweat_rate = 0.0
+                        sweat_rates.append(0.0)
                     else:
                         clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
                         if clean_val:
-                            try: sweat_rate = float(clean_val)
+                            try: sweat_rates.append(float(clean_val))
                             except ValueError: pass
                             
             # Temperature Look-up
-            # Note: The UI drops the literal string "31°C" in some cases.
             if "°C" in t:
                 raw_value = text.strip()
                 clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
                 if clean_val:
-                    try: temp = float(clean_val)
+                    try: temps.append(float(clean_val))
                     except ValueError: pass
             
-            # Fallback if only the label "TEMP. SENSOR" is found. Note the value sits right ABOVE it (i - 1) in the UI tree!
+            # Fallback if only the label "TEMP. SENSOR" is found
             elif "TEMP" in t and "SENSOR" in t:
                 if i > 0:
                     raw_value = all_text[i - 1].strip()
                     if raw_value in ("--", "-", "—", ""):
-                        temp = 0.0
+                        temps.append(0.0)
                     elif "°C" in raw_value.upper():
                         clean_val = "".join(c for c in raw_value if c.isdigit() or c == '.')
                         if clean_val:
-                            try: temp = float(clean_val)
+                            try: temps.append(float(clean_val))
                             except ValueError: pass
+
+        fluid = max(fluids) if fluids else None
+        temp = max(temps) if temps else None
+        sweat_rate = max(sweat_rates) if sweat_rates else None
 
         return {"fluid": fluid, "temp": temp, "sweat_rate": sweat_rate}
 
@@ -306,12 +310,12 @@ def read_hdrop():
     global _device, _last_fluid_loss
 
     if _device is None:
-        return {"fluid": None, "temp": None}
+        return {"fluid": None, "temp": None, "sweat_rate": None}
 
     if not ensure_hdrop_foreground(_device):
         # Try to bring it back
         if not launch_hdrop(_device):
-            return {"fluid": None, "temp": None}
+            return {"fluid": None, "temp": None, "sweat_rate": None}
 
     metrics = get_hdrop_metrics(_device)
     if metrics.get("fluid") is not None:
