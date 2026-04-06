@@ -604,4 +604,21 @@ def main():
         ca_reader.running = False
 
 if __name__ == "__main__":
+    try:
+        # Dynamically calculate the Pi's active Wi-Fi / Hotspot IP Address
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        current_ip = s.getsockname()[0]
+        s.close()
+        
+        # Fire the autonomous email alert!
+        import email_notifier
+        email_notifier.fire_alert(
+            "🚀 Pi Dashboard is Live!", 
+            f"Your E-Bike computer just booted successfully!\n\nOpen Safari/Chrome on your phone and tap this exact link to start your ride:\nhttp://{current_ip}:5000\n\n(Note: If on the road, ensure your phone's hotspot is on!)"
+        )
+    except Exception as e:
+        print(f"Failed to auto-email boot IP: {e}")
+        
     main()

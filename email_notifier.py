@@ -11,11 +11,11 @@ import time
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
-SENDER_EMAIL = "williamsjosh0402@gmail.com"
-SENDER_APP_PASSWORD = "lkni qcmq nehx bmiv"
+SENDER_EMAIL = "firesparksailing@gmail.com"
+SENDER_APP_PASSWORD = "aiah ckjf bekk jfml"
 
 # Put the email address of the phone in your pocket here!
-RECEIVER_EMAIL = "williamsjosh0402@gmail.com"
+RECEIVER_EMAIL = "firesparksailing@gmail.com"
 
 # =========================================================================
 
