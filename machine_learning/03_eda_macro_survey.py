@@ -1,0 +1,118 @@
+import sys
+import os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import re
+
+# Set up paths to safely import Supabase credentials from the global config
+try:
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.py')
+    with open(config_path, 'r') as f:
+        config_text = f.read()
+        
+    SUPABASE_URL = re.search(r'SUPABASE_URL\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
+    SUPABASE_KEY = re.search(r'SUPABASE_KEY\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
+    
+    from supabase import create_client
+except Exception as e:
+    print(f"Error loading Supabase credentials: {e}")
+    sys.exit(1)
+
+def fetch_surveys(client):
+    print("Fetching survey results from 'ride_surveys' table...")
+    response = client.table("ride_surveys").select("*").execute()
+    data = response.data
+    if not data:
+        return pd.DataFrame()
+    return pd.DataFrame(data)
+
+def fetch_macro_telemetry(client):
+    print("Fetching telemetry to aggregate total fluid loss from 'ride_metrics_v2'...")
+    all_data = []
+    chunk_size = 1000
+    start = 0
+    while True:
+        # We only strictly need ride_id and fluid_loss_l for this aggregation (saves memory)
+        response = client.table("ride_metrics_v2").select("ride_id, fluid_loss_l").range(start, start + chunk_size - 1).execute()
+        data = response.data
+        if not data:
+            break
+        all_data.extend(data)
+        if len(data) < chunk_size:
+            break
+        start += chunk_size
+    
+    df = pd.DataFrame(all_data)
+    if df.empty:
+        return pd.DataFrame()
+        
+    # Force numbers and calculate the total fluid loss (which is just the peak value reached in that session)
+    df['fluid_loss_l'] = pd.to_numeric(df['fluid_loss_l'], errors='coerce')
+    macro_df = df.groupby('ride_id')['fluid_loss_l'].max().reset_index()
+    macro_df.rename(columns={'fluid_loss_l': 'total_fluid_loss_l'}, inplace=True)
+    return macro_df
+
+def plot_correlation(merged_df, output_dir):
+    print("Generating biological vs subjective Scatter Plot...")
+    
+    plt.figure(figsize=(10, 6))
+    
+    x = merged_df['total_fluid_loss_l'].fillna(0)
+    y = pd.to_numeric(merged_df['sweat_perception_score'], errors='coerce')
+    
+    # Plot real historic rides
+    plt.scatter(x, y, color='#2ECC71', s=120, alpha=0.9, edgecolors='black', label='Historical Rides')
+    
+    # Calculate linear trendline (Line of Best Fit) if we have enough points
+    if len(merged_df) > 1:
+        z = np.polyfit(x, y, 1)
+        p = np.poly1d(z)
+        plt.plot(x, p(x), "r--", linewidth=2.5, alpha=0.7, label="Physiological Trendline")
+    
+    plt.title("Correlation Proof: Objective Fluid Loss vs. Subjective Perception", fontsize=14, fontweight='bold')
+    plt.xlabel("Total Fluid Loss Measured by Wearable (Litres)", fontsize=12)
+    plt.ylabel("Subjective Output: Survey Score (1-5)", fontsize=12)
+    
+    # Format Y axis elegantly
+    plt.yticks([1, 2, 3, 4, 5], ['1 (Dry)', '2 (Light)', '3 (Moderate)', '4 (Heavy)', '5 (Max)'])
+    plt.ylim(0.5, 5.5)
+    plt.grid(True, linestyle='--', alpha=0.3)
+    plt.legend(loc='lower right')
+    
+    output_path = os.path.join(output_dir, '03_survey_correlation_plot.png')
+    plt.savefig(output_path, bbox_inches='tight')
+    plt.close()
+    
+    print(f"-> Saved Correlational Plot: {output_path}")
+
+def main():
+    print("="*60)
+    print(" STEP 3: MACRO EDA - SUBJECTIVE SURVEY CORRELATION")
+    print("="*60)
+    
+    client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    
+    surveys_df = fetch_surveys(client)
+    telemetry_df = fetch_macro_telemetry(client)
+    
+    if surveys_df.empty or telemetry_df.empty:
+        print("Not enough data to cross-reference tables.")
+        return
+        
+    # Perform strict INNER JOIN to ensure we only plot rides that have both biological data AND a survey score
+    merged_df = pd.merge(telemetry_df, surveys_df, on='ride_id', how='inner')
+    
+    print(f"\n✅ Matched {len(merged_df)} distinct rides that contain both a Survey Score and Telemetry.")
+    
+    if len(merged_df) == 0:
+        print("⚠️ No matching rides found between the two tables.")
+        print("Did you submit the survey on the web app for the rides you just tracked?")
+        return
+        
+    output_dir = os.path.dirname(os.path.abspath(__file__))
+    plot_correlation(merged_df, output_dir)
+    print("\nNext steps: Open the generated PNG to visually prove your personalized biological threshold!")
+
+if __name__ == "__main__":
+    main()
