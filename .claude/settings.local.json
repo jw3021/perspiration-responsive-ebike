@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pdflatex system_overview_diagram.tex)"
+    ]
+  }
+}

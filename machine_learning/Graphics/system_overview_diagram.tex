@@ -1,0 +1,41 @@
+\documentclass[border=14pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+
+\tikzset{
+    box/.style={
+        rectangle, draw=black, thick,
+        minimum width=3.2cm, minimum height=1.2cm,
+        align=center, font=\small
+    },
+    arrow/.style={->, >=Stealth, line width=1.2pt}
+}
+
+\begin{document}
+\begin{tikzpicture}[node distance=2.4cm]
+
+%% ── Four boxes in a horizontal row ──────────────────────────────────────────
+\node[box] (sensor)
+    {\textbf{Sensor Input}\\{\footnotesize Sweat Rate, Skin Temp,\\Torque, Speed}};
+
+\node[box, right=2.4cm of sensor] (thresh)
+    {\textbf{Threshold}\\{\footnotesize Sweat onset label\\(0.3\,L/hr)}};
+
+\node[box, right=2.4cm of thresh] (ml)
+    {\textbf{Digital Twin}\\{\footnotesize Predict sweat onset\\(Random Forest)}};
+
+\node[box, right=2.4cm of ml] (actuate)
+    {\textbf{Actuation}\\{\footnotesize Adjust motor\\assist level}};
+
+%% ── Forward arrows ───────────────────────────────────────────────────────────
+\draw[arrow] (sensor)  -- (thresh);
+\draw[arrow] (thresh)  -- (ml);
+\draw[arrow] (ml)      -- (actuate);
+
+%% ── Feedback arrow (below) ───────────────────────────────────────────────────
+\draw[arrow] (actuate.south) -- ++(0,-1.0)
+             -| node[pos=0.25, below, font=\footnotesize\itshape]
+                {Rider exertion changes} (sensor.south);
+
+\end{tikzpicture}
+\end{document}
