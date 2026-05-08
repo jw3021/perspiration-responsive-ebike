@@ -99,6 +99,11 @@ def print_summary(df: pd.DataFrame, ride_id: str):
     print(f"  Avg cadence       : {df['rpm'][df['rpm'] > 0].mean():.0f} RPM  (when pedalling)")
     print(f"  Max torque        : {df['torque_nm'].max():.1f} Nm")
     print(f"  Motor assist      : {pct_assist:.1f}% of ride time")
+    if "motor_power_w" in df.columns and df["motor_power_w"].notna().any():
+        max_pwr = df["motor_power_w"].max()
+        avg_pwr = df["motor_power_w"][df["motor_power_w"] > 0].mean()
+        print(f"  Max motor power   : {max_pwr:.0f} W")
+        print(f"  Avg motor power   : {avg_pwr:.0f} W  (when active)")
     print(f"  Ambient temp      : {df['temp_c'].mean():.1f} °C avg")
     print(f"  Humidity          : {df['humidity_pct'].mean():.1f}% avg")
     if total_fluid is not None:
@@ -202,12 +207,12 @@ def plot_ride(df: pd.DataFrame, ride_id: str):
     ax6.legend(fontsize=7)
     ax6.grid(True, alpha=0.3)
 
-    # ── 7. Torque vs Voltage scatter (verify assist mapping) ─────────────────
+    # ── 7. Torque vs Voltage scatter (verify algorithm mapping) ────────────────
     ax7 = fig.add_subplot(gs[2, 0])
     sc = ax7.scatter(df["torque_nm"], df["voltage_out"],
                      c=df["speed_kph"], cmap="viridis", s=8, alpha=0.5)
     plt.colorbar(sc, ax=ax7, label="Speed (km/h)")
-    ax7.set_title("Torque → Motor Voltage\n(coloured by speed)")
+    ax7.set_title("Torque → Algorithm Voltage\n(coloured by speed)")
     ax7.set_xlabel("Torque (Nm)")
     ax7.set_ylabel("Voltage out (V)")
     ax7.grid(True, alpha=0.3)
@@ -224,18 +229,20 @@ def plot_ride(df: pd.DataFrame, ride_id: str):
     ax8.legend(fontsize=7)
     ax8.grid(True, alpha=0.3)
 
-    # ── 9. HDrop data coverage / connection quality ───────────────────────────
+    # ── 9. Torque vs Physical Motor Power scatter (verify actual terrain) ─────
     ax9 = fig.add_subplot(gs[2, 2])
-    fluid_present = df["fluid_loss_l"].notna().astype(int)
-    # Rolling 60-row window (~1 min) shows dropout regions clearly
-    coverage = fluid_present.rolling(60, min_periods=1).mean() * 100
-    ax9.fill_between(x, coverage, alpha=0.4, color="#8BC34A")
-    ax9.plot(x, coverage, color="#558B2F", linewidth=1.0)
-    ax9.set_ylim(0, 110)
-    ax9.axhline(100, color="green", linestyle=":", linewidth=0.7, alpha=0.5)
-    ax9.set_title("HDrop Connection Quality\n(rolling 1-min coverage %)")
-    ax9.set_xlabel("Elapsed (min)")
-    ax9.set_ylabel("Coverage (%)")
+    if "motor_power_w" in df.columns and df["motor_power_w"].notna().any():
+        sc9 = ax9.scatter(df["torque_nm"], df["motor_power_w"],
+                         c=df["speed_kph"], cmap="plasma", s=8, alpha=0.6)
+        plt.colorbar(sc9, ax=ax9, label="Speed (km/h)")
+        ax9.set_title("Leg Torque vs Motor Power (W)\n(Actual Thermodynamic Effort)")
+        ax9.set_ylabel("Motor Power (Watts)")
+    else:
+        ax9.text(0.5, 0.5, "No Motor Power Logged", transform=ax9.transAxes,
+                 ha="center", va="center", color="grey")
+        ax9.set_title("Leg Torque vs Motor Power (W)")
+        
+    ax9.set_xlabel("Torque (Nm)")
     ax9.grid(True, alpha=0.3)
 
     plt.savefig(os.path.join(os.path.dirname(__file__), f"{ride_id}_analysis.png"),

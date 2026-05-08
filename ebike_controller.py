@@ -25,6 +25,9 @@ import queue
 import email_notifier
 # --- GLOBAL STATE ---
 current_speed_kph = 0.0
+current_battery_voltage_v = 0.0
+current_motor_amps_a = 0.0
+current_motor_power_w = 0.0
 last_cadence_time = 0
 cadence_pulse_count = 0
 current_cadence_rpm = 0.0
@@ -132,12 +135,20 @@ class CycleAnalystReader(threading.Thread):
         parts = line.split('\t')
         if len(parts) > 3:
             try:
-                # Speed is index 3
+                # Index [1] = Volts, Index [2] = Amps, Index [3] = Speed
+                volts = float(parts[1])
+                amps = float(parts[2])
+                # Index [1] = Volts, Index [2] = Amps, Index [3] = Speed
+                volts = float(parts[1])
+                amps = float(parts[2])
                 self.speed = float(parts[3])
                 
-                # Update global speed
-                global current_speed_kph
+                # Update global states
+                global current_speed_kph, current_battery_voltage_v, current_motor_amps_a, current_motor_power_w
                 current_speed_kph = self.speed
+                current_battery_voltage_v = volts
+                current_motor_amps_a = amps
+                current_motor_power_w = volts * amps
             except ValueError:
                 pass
 
@@ -550,7 +561,7 @@ def main():
                     filename = f"ride_logs/{current_ride_id}.csv"
                     csv_file = open(filename, 'w', newline='')
                     csv_writer = csv.writer(csv_file)
-                    csv_writer.writerow(["ride_id", "timestamp", "rpm", "speed_kph", "torque_nm", "voltage_out", "power_band", "temp_c", "humidity_pct", "fluid_loss_l", "sweat_rate_l_hr", "skin_temp_c"])
+                    csv_writer.writerow(["ride_id", "timestamp", "rpm", "speed_kph", "torque_nm", "voltage_out", "battery_voltage_v", "motor_current_a", "motor_power_w", "power_band", "temp_c", "humidity_pct", "fluid_loss_l", "sweat_rate_l_hr", "skin_temp_c"])
                     is_logging = True
                     print(f"\n[IoT] STARTED RECORDING {current_ride_id} TO {filename}")
                 
@@ -569,6 +580,9 @@ def main():
                         "speed_kph": round(current_speed_kph, 1),
                         "torque_nm": round(smoothed_torque, 1),
                         "voltage_out": round(target_voltage, 2),
+                        "battery_voltage_v": round(current_battery_voltage_v, 2),
+                        "motor_current_a": round(current_motor_amps_a, 2),
+                        "motor_power_w": round(current_motor_power_w, 2),
                         "power_band": config.CURRENT_POWER_BAND,
                         "temp_c": round(current_temp_c, 2),
                         "humidity_pct": round(current_humid_pct, 2),
@@ -580,6 +594,7 @@ def main():
                     csv_writer.writerow([
                         row_data["ride_id"], row_data["timestamp"], row_data["rpm"], 
                         row_data["speed_kph"], row_data["torque_nm"], row_data["voltage_out"], 
+                        row_data["battery_voltage_v"], row_data["motor_current_a"], row_data["motor_power_w"],
                         row_data["power_band"], row_data["temp_c"], row_data["humidity_pct"], 
                         row_data["fluid_loss_l"], row_data["sweat_rate_l_hr"], row_data["skin_temp_c"]
                     ])

@@ -56,6 +56,12 @@ def engineer_features(df):
         ride_df['power_watts'] = ride_df['torque_nm'] * ride_df['rpm'] * 0.10472
         ride_df['work_joules'] = ride_df['power_watts'] * ride_df['dt_seconds']
         ride_df['exertion_debt_kj'] = ride_df['work_joules'].cumsum() / 1000.0
+
+        # 2b. Exertion Intensity (kJ/min) — separates "worked hard" from "rode for a long time"
+        # Answers: "how hard have you been working on average so far?"
+        elapsed_minutes = ride_df['dt_seconds'].cumsum() / 60.0
+        ride_df['exertion_intensity_kj_per_min'] = ride_df['exertion_debt_kj'] / elapsed_minutes.replace(0, np.nan)
+        ride_df['exertion_intensity_kj_per_min'] = ride_df['exertion_intensity_kj_per_min'].fillna(0)
         
         # 3. Rolling Mechanical Averages (Using Time-Based Windows)
         ride_df = ride_df.set_index('timestamp')
@@ -67,7 +73,10 @@ def engineer_features(df):
         # Forward fill the wearable data, then apply a rolling smooth to curve the data beautifully.
         # Ensure we don't trigger future warnings by inferring objects directly
         ride_df['sweat_rate_l_hr'] = pd.to_numeric(ride_df['sweat_rate_l_hr'], errors='coerce')
-        ride_df['sweat_rate_raw'] = ride_df['sweat_rate_l_hr'].ffill().fillna(0)
+        # limit=600 caps forward-fill at 600 rows (30 seconds at 50ms intervals).
+        # Beyond that, a gap in the sweat sensor is treated as missing (0) rather
+        # than propagating a potentially stale reading indefinitely.
+        ride_df['sweat_rate_raw'] = ride_df['sweat_rate_l_hr'].ffill(limit=600).fillna(0)
         
         # Smooth out the jagged blocks over a rolling window of rows
         ride_df['sweat_rate_smoothed'] = ride_df['sweat_rate_raw'].rolling(window=100, min_periods=1, center=True).mean()
@@ -137,10 +146,11 @@ def main():
     
     # 5. Build the pristine final Machine Learning dataset
     ml_columns = [
-        'timestamp', 'ride_id', 
+        'timestamp', 'ride_id',
         'temp_c', 'humidity_pct', 'speed_kph', 'skin_temp_c',
-        'torque_nm', 'rpm', 
+        'torque_nm', 'rpm',
         'torque_rolling_3min', 'rpm_rolling_3min', 'exertion_debt_kj',
+        'power_watts', 'exertion_intensity_kj_per_min',
         'sweat_rate_smoothed', 'is_sweating'
     ]
     
