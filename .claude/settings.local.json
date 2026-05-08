@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pdflatex system_overview_diagram.tex)"
+      "Bash(pdflatex system_overview_diagram.tex)",
+      "Bash(git -C \"c:/Users/willi/OneDrive - Imperial College London/4th Year/MASTERS/CODE/Pi_code\" push -v origin adding-power-to-datastream)"
     ]
   }
 }
