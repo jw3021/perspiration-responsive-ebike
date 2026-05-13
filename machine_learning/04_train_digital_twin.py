@@ -2,6 +2,8 @@ import os
 import sys
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 try:
@@ -22,7 +24,9 @@ def main():
     print("="*60)
     
     # 1. Load the pristine engineering dataset we built in Step 2
-    csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_ready_dataset.csv')
+    csv_path     = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_ready_dataset.csv')
+    graphics_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'graphics')
+    os.makedirs(graphics_dir, exist_ok=True)
     if not os.path.exists(csv_path):
         print(f"Error: {csv_path} not found. Run Step 2 (Feature Engineering) first!")
         return
@@ -106,7 +110,7 @@ def main():
     disp.plot(ax=ax, cmap='Blues', values_format='.2%')
     ax.set_title("Confusion Matrix (normalised)\nEach cell = % of actual class")
     plt.tight_layout()
-    cm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '04_confusion_matrix.png')
+    cm_path = os.path.join(graphics_dir, '04_confusion_matrix.png')
     plt.savefig(cm_path, dpi=150)
     plt.close()
     print(f"\n-> Saved Confusion Matrix: {cm_path}")
@@ -126,7 +130,7 @@ def main():
     plt.legend(loc='lower right')
     plt.grid(True, linestyle='--', alpha=0.3)
     plt.tight_layout()
-    roc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '04_roc_curve.png')
+    roc_path = os.path.join(graphics_dir, '04_roc_curve.png')
     plt.savefig(roc_path, dpi=150)
     plt.close()
     print(f"-> Saved ROC Curve (AUC = {roc_auc:.3f}): {roc_path}")
@@ -155,17 +159,106 @@ def main():
              label='Predicted sweat probability')
     ax1.axhline(0.5, color='grey', linestyle='--', linewidth=0.8, label='Decision threshold (0.5)')
     ax1.set_ylim(-0.05, 1.15)
-    ax1.set_xlabel('Reading index (50ms intervals)')
+    ax1.set_xlabel('Reading index (~1s per row)')
     ax1.set_ylabel('Probability / Label')
     ax1.set_title(f'Temporal Prediction — Ride: {sample_ride_id}\n'
                   f'Red shading = actual sweat onset periods | Purple line = model confidence')
     ax1.legend(loc='upper left')
     ax1.grid(True, linestyle='--', alpha=0.25)
     plt.tight_layout()
-    temporal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '04_temporal_prediction.png')
+    temporal_path = os.path.join(graphics_dir, '04_temporal_prediction.png')
     plt.savefig(temporal_path, dpi=150)
     plt.close()
     print(f"-> Saved Temporal Prediction Plot (ride: {sample_ride_id}): {temporal_path}")
+
+    # --- Lead Time Analysis ---
+    # The core claim of a predictive system is that it detects onset *before* the sensor.
+    # "Sustained trigger" = first point where predicted probability stays above 0.5
+    # for 600 consecutive readings (30 seconds), avoiding false triggers from brief spikes.
+    print("\n" + "="*60)
+    print("  LEAD TIME ANALYSIS")
+    print("  How far ahead does the model predict sweat onset?")
+    print("="*60)
+
+    SUSTAINED_READINGS = 30    # 30 seconds at ~1s per row
+    PROB_THRESHOLD     = 0.5
+
+    lead_time_results = []
+    for rid in sorted(test_ids):
+        ride_mask  = df['ride_id'] == rid
+        X_ride     = df.loc[ride_mask, feature_cols]
+        y_ride     = df.loc[ride_mask, 'is_sweating'].values
+        proba_ride = clf.predict_proba(X_ride)[:, 1]
+
+        sweating_idxs = np.where(y_ride == 1)[0]
+        if len(sweating_idxs) == 0:
+            print(f"  {rid}: No sweat onset recorded — skipped")
+            continue
+        sensor_onset_idx = sweating_idxs[0]
+
+        # Walk forward to find first sustained run above threshold
+        model_trigger_idx = None
+        run_length        = 0
+        for i, p in enumerate(proba_ride):
+            if p > PROB_THRESHOLD:
+                run_length += 1
+                if run_length >= SUSTAINED_READINGS:
+                    model_trigger_idx = i - SUSTAINED_READINGS + 1
+                    break
+            else:
+                run_length = 0
+
+        if model_trigger_idx is None:
+            print(f"  {rid}: Model never sustained a trigger — skipped")
+            continue
+
+        sensor_onset_min  = sensor_onset_idx  / 60   # ~1s per row
+        model_trigger_min = model_trigger_idx / 60
+        lead_time_min     = sensor_onset_min - model_trigger_min
+
+        lead_time_results.append({
+            'ride_id':           rid,
+            'sensor_onset_min':  round(sensor_onset_min,  1),
+            'model_trigger_min': round(model_trigger_min, 1),
+            'lead_time_min':     round(lead_time_min,     1),
+        })
+
+        symbol    = "✅" if lead_time_min > 0 else "⚠️ "
+        direction = "ahead of" if lead_time_min > 0 else "behind"
+        print(f"  {rid}:")
+        print(f"    Sensor onset : {sensor_onset_min:.1f} min into ride")
+        print(f"    Model trigger: {model_trigger_min:.1f} min into ride")
+        print(f"    Lead time    : {abs(lead_time_min):.1f} min {symbol} (model {direction} sensor)")
+
+    if lead_time_results:
+        lt_df     = pd.DataFrame(lead_time_results)
+        mean_lead = lt_df['lead_time_min'].mean()
+        print(f"\n  Average lead time across {len(lt_df)} test rides: {mean_lead:.1f} minutes")
+        if mean_lead > 0:
+            print(f"  ✅ Model predicts onset {mean_lead:.1f} min ahead of sensor on average")
+        else:
+            print(f"  ⚠️  Model lags sensor by {abs(mean_lead):.1f} min on average")
+
+        _, ax = plt.subplots(figsize=(10, 5))
+        colors = ['#2ECC71' if lt > 0 else '#E74C3C' for lt in lt_df['lead_time_min']]
+        ax.bar(range(len(lt_df)), lt_df['lead_time_min'],
+               color=colors, edgecolor='black', alpha=0.85)
+        ax.axhline(0, color='black', linewidth=1)
+        ax.axhline(mean_lead, color='#8E44AD', linewidth=2, linestyle='--',
+                   label=f'Mean: {mean_lead:.1f} min')
+        ax.set_xticks(range(len(lt_df)))
+        ax.set_xticklabels([r['ride_id'].replace('RIDE_', '') for r in lead_time_results],
+                           rotation=30, ha='right', fontsize=9)
+        ax.set_ylabel('Lead Time (minutes)\n+ = model early   − = model late')
+        ax.set_title('Model Lead Time vs Sweat Sensor Onset\n'
+                     'Green = predicted early | Red = predicted late')
+        ax.legend()
+        ax.grid(axis='y', linestyle='--', alpha=0.3)
+        plt.tight_layout()
+        lead_path = os.path.join(graphics_dir, '04_lead_time.png')
+        plt.savefig(lead_path, dpi=150)
+        plt.close()
+        print(f"  -> Saved Lead Time Chart: {lead_path}")
 
     # 6. Per-ride summary: how many rides crossed the sweat threshold?
     print("\n" + "="*60)
@@ -205,7 +298,7 @@ def main():
     plt.grid(axis='y', linestyle='--', alpha=0.3)
     plt.tight_layout()
     
-    plot_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '04_feature_importance.png')
+    plot_path = os.path.join(graphics_dir, '04_feature_importance.png')
     plt.savefig(plot_path)
     print(f"\n-> Saved Feature Importance Graph: {plot_path}")
     
@@ -279,7 +372,7 @@ def main():
     plt.ylim(40, 105)
     plt.tight_layout()
 
-    lc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '04_learning_curve.png')
+    lc_path = os.path.join(graphics_dir, '04_learning_curve.png')
     plt.savefig(lc_path)
     plt.close()
     print(f"  -> Saved Learning Curve: {lc_path}")

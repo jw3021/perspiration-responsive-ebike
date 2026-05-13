@@ -42,10 +42,11 @@ except ImportError:
 # ── Shared config ────────────────────────────────────────────────────────────
 
 FEATURE_COLS = [
-    'torque_nm', 'rpm',
-    'torque_rolling_3min', 'rpm_rolling_3min', 'exertion_debt_kj',
-    'power_watts', 'exertion_intensity_kj_per_min',
-    'temp_c', 'humidity_pct', 'speed_kph', 'skin_temp_c'
+    'exertion_debt_kj',
+    'exertion_intensity_kj_per_min',
+    'humidity_pct',
+    'temp_c',
+    'torque_rolling_3min',
 ]
 TARGET_COL   = 'is_sweating'
 RANDOM_STATE = 42
@@ -219,7 +220,8 @@ def main():
     X       = df[FEATURE_COLS]
     y       = df[TARGET_COL]
     groups  = df['ride_id']
-    out_dir = os.path.dirname(os.path.abspath(__file__))
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'graphics')
+    os.makedirs(out_dir, exist_ok=True)
 
     results = {}
 

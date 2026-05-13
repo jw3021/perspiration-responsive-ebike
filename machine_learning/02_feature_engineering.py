@@ -73,13 +73,16 @@ def engineer_features(df):
         # Forward fill the wearable data, then apply a rolling smooth to curve the data beautifully.
         # Ensure we don't trigger future warnings by inferring objects directly
         ride_df['sweat_rate_l_hr'] = pd.to_numeric(ride_df['sweat_rate_l_hr'], errors='coerce')
-        # limit=600 caps forward-fill at 600 rows (30 seconds at 50ms intervals).
+        # limit=30 caps forward-fill at 30 rows (30 seconds at ~1s per row).
         # Beyond that, a gap in the sweat sensor is treated as missing (0) rather
         # than propagating a potentially stale reading indefinitely.
-        ride_df['sweat_rate_raw'] = ride_df['sweat_rate_l_hr'].ffill(limit=600).fillna(0)
+        ride_df['sweat_rate_raw'] = ride_df['sweat_rate_l_hr'].ffill(limit=30).fillna(0)
         
-        # Smooth out the jagged blocks over a rolling window of rows
-        ride_df['sweat_rate_smoothed'] = ride_df['sweat_rate_raw'].rolling(window=100, min_periods=1, center=True).mean()
+        # Smooth out the jagged blocks over a 10-second time-based rolling window.
+        # Time-based ensures consistency regardless of any variation in logging rate.
+        ride_df = ride_df.set_index('timestamp')
+        ride_df['sweat_rate_smoothed'] = ride_df['sweat_rate_raw'].rolling('10s', min_periods=1, center=True).mean()
+        ride_df = ride_df.reset_index()
         
         # Create the Binary Target for the Classification Model 
         # (Assuming 0.3 L/hr is the threshold for 'significant physiological shift')

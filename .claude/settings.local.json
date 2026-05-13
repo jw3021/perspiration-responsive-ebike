@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(pdflatex system_overview_diagram.tex)",
-      "Bash(git -C \"c:/Users/willi/OneDrive - Imperial College London/4th Year/MASTERS/CODE/Pi_code\" push -v origin adding-power-to-datastream)"
+      "Bash(git -C \"c:/Users/willi/OneDrive - Imperial College London/4th Year/MASTERS/CODE/Pi_code\" push -v origin adding-power-to-datastream)",
+      "Bash(powershell -Command \"python -c \"\"import pandas as pd; df = pd.read_csv\\(''c:/Users/willi/OneDrive - Imperial College London/4th Year/MASTERS/CODE/Pi_code/machine_learning/ml_ready_dataset.csv''\\); rc = df.groupby\\(''ride_id''\\).size\\(\\); rm = rc * 0.05 / 60; [print\\(f''{r}: {int\\(v\\)} rows = {v*0.05/60:.1f} min''\\) for r,v in rc.items\\(\\)]; print\\(\\); print\\(f''Min: {rm.min\\(\\):.1f} min, Max: {rm.max\\(\\):.1f} min, Mean: {rm.mean\\(\\):.1f} min''\\); print\\(f''Rides under 3 min \\(3600 rows\\): {\\(rc < 3600\\).sum\\(\\)} of {len\\(rc\\)}''\\)\"\" \")",
+      "Bash(python -c \":*)",
+      "Bash(python3 -c \":*)",
+      "Bash(find 'c:/Users/willi/OneDrive - Imperial College London/4th Year/MASTERS/CODE/Pi_code' -name *.html -o -name *.js -o -name *.json)"
     ]
   }
 }

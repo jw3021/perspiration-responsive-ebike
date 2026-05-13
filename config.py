@@ -19,16 +19,13 @@ MOTOR_IDLE_OUTPUT_V = 1.0     # 1.0V = Idle/Zero-assist baseline without trigger
 MOTOR_MIN_ASSIST_V = 1.5      # 1.5V = Physical kick-in voltage (Minimum throttle)
 
 # --- POWER BANDS (IoT Ready) ---
-# Valid options: "LOW", "MEDIUM", "HIGH"
-# LOW    = Least power (Data collection / Normal riding)
-# MEDIUM = Medium power (Noticeable assist)
-# HIGH   = Full power (Sweat prediction / Maximum assist)
+# Valid options: "LOW", "HIGH"
+# LOW  = Normal riding (data collection baseline)
+# HIGH = Sweat-triggered maximum assist
 CURRENT_POWER_BAND = "LOW"
 
 if CURRENT_POWER_BAND == "LOW":
     MOTOR_MAX_OUTPUT_V = 2.5
-elif CURRENT_POWER_BAND == "MEDIUM":
-    MOTOR_MAX_OUTPUT_V = 3.5
 else:
     MOTOR_MAX_OUTPUT_V = 4.5
 
