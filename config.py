@@ -59,6 +59,21 @@ MAX_SPEED_KPH = 25.0        # Legal speed limit for assist
 ASSIST_LEVEL_FACTOR = 1.0   # Multiplier for assist strength (Tune as needed)
 MAX_TORQUE_INPUT_NM = 60.0  # Cap input torque for calculations
 
+# --- ML ACTUATION PARAMETERS ---
+ML_MODEL_PATH = "machine_learning/digital_twin_model.pkl"
+
+# Sweat onset trigger: model must predict sweat continuously for this many
+# seconds before actuation fires, preventing single-spike false positives.
+SWEAT_ONSET_SUSTAINED_SECONDS = 30
+
+# Probability threshold above which a single reading counts as a sweat prediction
+SWEAT_ONSET_PROBABILITY_THRESHOLD = 0.5
+
+# Sweat reduction mode voltage profile (speed-dependent ceiling)
+COLD_START_CUTOFF_KPH  = 12.0  # Speed at which cold-start taper ends
+SWEAT_REDUCTION_MAX_V  = 4.5   # Ceiling at standstill (full cold-start assist)
+SWEAT_REDUCTION_CRUISE_V = 3.0 # Ceiling above COLD_START_CUTOFF_KPH (sustained elevated assist)
+
 # --- IOT CLOUD CONFIGURATION ---
 SUPABASE_URL = "https://ljjuacwtjcvqxrtqomrn.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqanVhY3d0amN2cXhydHFvbXJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTA5MDMsImV4cCI6MjA4OTU4NjkwM30.zmfCAMfbm8H2Zli5wbjGJEmkXkNy5UyKl0d3EQM-yzI"

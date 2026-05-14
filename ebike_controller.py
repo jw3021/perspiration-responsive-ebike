@@ -19,10 +19,18 @@ import web_server
 import hdrop_reader
 import csv
 import os
+import json
+import collections
 from datetime import datetime
 import adafruit_ahtx0
 import queue
 import email_notifier
+try:
+    import joblib
+    JOBLIB_AVAILABLE = True
+except ImportError:
+    JOBLIB_AVAILABLE = False
+    print("[ML] Warning: joblib not installed. Actuation mode will be unavailable.")
 # --- GLOBAL STATE ---
 current_speed_kph = 0.0
 current_battery_voltage_v = 0.0
@@ -351,23 +359,136 @@ class CloudSyncManager(threading.Thread):
             
     def run(self):
         while self.running:
-            batch = []
             try:
-                # Wait up to 3 seconds for a new row from the controller loop
-                item = self.queue.get(timeout=3.0)
-                batch.append(item)
-                
-                # Grab any other items immediately available to bulk upload efficiently
+                # Each queue item is a (table_name, row_dict) tuple
+                table_name, item = self.queue.get(timeout=3.0)
+                batch = [item]
+
+                # Drain any additional rows for the same table for bulk efficiency
                 while not self.queue.empty() and len(batch) < 10:
-                    batch.append(self.queue.get_nowait())
-                    
+                    next_table, next_item = self.queue.get_nowait()
+                    if next_table == table_name:
+                        batch.append(next_item)
+                    else:
+                        # Different table — upload current batch first, then re-queue
+                        if self.supabase is not None:
+                            self.supabase.table(table_name).insert(batch).execute()
+                        batch = [next_item]
+                        table_name = next_table
+
                 if self.supabase is not None and len(batch) > 0:
-                    self.supabase.table("ride_metrics_v2").insert(batch).execute()
-                    
+                    self.supabase.table(table_name).insert(batch).execute()
+
             except queue.Empty:
-                pass # Normal wait timeout
+                pass
             except Exception as e:
                 print(f"[Supabase Upload Error] {e}")
+
+class SweatPredictor:
+    """
+    Loads the trained Random Forest and model_config.json from machine_learning/.
+    Call reset() at ride start, then update() once per second.
+    Returns (triggered, probability) — triggered latches True and stays True.
+    """
+    def __init__(self):
+        self.model        = None
+        self.feature_cols = []
+        self.threshold    = 0.5
+        self._load()
+
+        self.torque_buffer       = collections.deque()
+        self.exertion_debt_kj    = 0.0
+        self.ride_start_time     = None
+        self.last_update_time    = None
+        self.consecutive_triggers = 0
+        self.triggered           = False
+
+    def _load(self):
+        if not JOBLIB_AVAILABLE:
+            return
+        try:
+            base = os.path.dirname(os.path.abspath(__file__))
+            model_path  = os.path.join(base, config.ML_MODEL_PATH)
+            config_path = os.path.join(base, 'machine_learning', 'model_config.json')
+            self.model = joblib.load(model_path)
+            with open(config_path) as f:
+                mc = json.load(f)
+            self.feature_cols = mc['feature_cols']
+            self.threshold    = mc['deployment_threshold']
+            print(f"[ML] Model loaded — threshold: {self.threshold}, features: {self.feature_cols}")
+        except Exception as e:
+            self.model = None
+            print(f"[ML] Could not load model: {e}. Actuation mode disabled.")
+
+    def reset(self):
+        self.torque_buffer        = collections.deque()
+        self.exertion_debt_kj     = 0.0
+        self.ride_start_time      = time.time()
+        self.last_update_time     = time.time()
+        self.consecutive_triggers = 0
+        self.triggered            = False
+
+    def update(self, torque_nm, rpm, temp_c, humidity_pct):
+        if self.model is None:
+            return False, 0.0
+
+        if self.ride_start_time is None:
+            self.reset()
+
+        now = time.time()
+        dt  = now - self.last_update_time if self.last_update_time else 1.0
+        self.last_update_time = now
+
+        # Exertion debt (cumulative kJ since ride start)
+        power_w = torque_nm * rpm * 0.10472
+        self.exertion_debt_kj += (power_w * dt) / 1000.0
+
+        # Exertion intensity (kJ/min)
+        elapsed_min = (now - self.ride_start_time) / 60.0
+        intensity = self.exertion_debt_kj / elapsed_min if elapsed_min > 0 else 0.0
+
+        # Rolling 3-minute torque mean
+        self.torque_buffer.append((now, torque_nm))
+        cutoff = now - 180.0
+        while self.torque_buffer and self.torque_buffer[0][0] < cutoff:
+            self.torque_buffer.popleft()
+        torque_rolling = sum(v for _, v in self.torque_buffer) / len(self.torque_buffer)
+
+        # Build feature vector in the exact order from model_config.json
+        feature_map = {
+            'exertion_debt_kj':              self.exertion_debt_kj,
+            'exertion_intensity_kj_per_min': intensity,
+            'humidity_pct':                  humidity_pct,
+            'temp_c':                        temp_c,
+            'torque_rolling_3min':           torque_rolling,
+        }
+        features = [[feature_map[col] for col in self.feature_cols]]
+
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            prob = self.model.predict_proba(features)[0][1]
+
+        if not self.triggered:
+            if prob >= self.threshold:
+                self.consecutive_triggers += 1
+            else:
+                self.consecutive_triggers = 0
+
+            if self.consecutive_triggers >= config.SWEAT_ONSET_SUSTAINED_SECONDS:
+                self.triggered = True
+
+        return self.triggered, prob
+
+
+def sweat_reduction_ceiling(speed_kph):
+    """Speed-dependent voltage ceiling for sweat reduction mode.
+    4.5V at standstill, linear taper to 3.0V at 12 km/h, flat 3.0V thereafter."""
+    if speed_kph < config.COLD_START_CUTOFF_KPH:
+        t = speed_kph / config.COLD_START_CUTOFF_KPH
+        return config.SWEAT_REDUCTION_MAX_V - t * (config.SWEAT_REDUCTION_MAX_V - config.SWEAT_REDUCTION_CRUISE_V)
+    return config.SWEAT_REDUCTION_CRUISE_V
+
 
 # --- MAIN CONTROL LOOP ---
 
@@ -426,6 +547,10 @@ def main():
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     
+    # Initialise ML predictor (loads model + config once at boot)
+    sweat_predictor = SweatPredictor()
+    predictor_notified = False  # Tracks whether we've fired the web notification this ride
+
     csv_file = None
     csv_writer = None
     is_logging = False
@@ -520,7 +645,10 @@ def main():
                 # Apply to Voltage Range
                 # Note: We map 0% assist to MOTOR_MIN_ASSIST_V (1.5V) so the motor responds instantly!
                 v_out_min = config.MOTOR_MIN_ASSIST_V
-                v_out_max = config.MOTOR_MAX_OUTPUT_V
+                if web_server.ride_mode == "ACTUATION" and sweat_predictor.triggered:
+                    v_out_max = sweat_reduction_ceiling(current_speed_kph)
+                else:
+                    v_out_max = config.MOTOR_MAX_OUTPUT_V  # 2.5V normal ceiling
                 
                 # Final Voltage
                 target_voltage = v_out_min + (assist_factor * (v_out_max - v_out_min))
@@ -541,37 +669,65 @@ def main():
                     pass # Ignore random I2C dropouts from electrical noise
                 last_aht_read_time = time.time()
             
-            # Debug Stats & CSV Logging (Every ~1s)
+            # Debug Stats, ML Inference & CSV Logging (Every ~1s)
             if (getattr(main, "counter", 0)) % 20 == 0:
+
+                # --- ML INFERENCE (actuation rides only) ---
+                ml_probability = 0.0
+                if web_server.ride_active and web_server.ride_mode == "ACTUATION":
+                    _, ml_probability = sweat_predictor.update(
+                        smoothed_torque, current_cadence_rpm, current_temp_c, current_humid_pct
+                    )
+                    # Notify web server once on first confirmed trigger
+                    if sweat_predictor.triggered and not predictor_notified:
+                        web_server.sweat_reduction_active = True
+                        web_server.sweat_triggered_at = datetime.now().isoformat()
+                        predictor_notified = True
+                        print(f"\n[ML] *** SWEAT ONSET CONFIRMED — switching to sweat reduction mode ***")
+
+                # Determine active power band label for logging
+                in_sweat_reduction = web_server.ride_mode == "ACTUATION" and sweat_predictor.triggered
+                current_power_band = "HIGH" if in_sweat_reduction else "LOW"
+
                 cache_flag = "*" if hdrop_manager.is_cached else ""
                 fluid_display = f"{hdrop_manager.current_fluid_l:.3f}L{cache_flag}" if hdrop_manager.current_fluid_l is not None else "None"
                 rate_display = f"{hdrop_manager.current_sweat_rate_l_hr:.3f}L/h{cache_flag}" if hdrop_manager.current_sweat_rate_l_hr is not None else "None"
                 skin_display = f"{hdrop_manager.current_skin_temp_c:.1f}°C" if hdrop_manager.current_skin_temp_c is not None else "None"
-                print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f} | Pwr: {config.CURRENT_POWER_BAND} | Fluid: {fluid_display} | Rate: {rate_display} | Skin: {skin_display}", flush=True)
-                
+                ml_display = f"{ml_probability:.2f}" if web_server.ride_mode == "ACTUATION" else "off"
+                print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f} | Band: {current_power_band} | ML: {ml_display} | Fluid: {fluid_display} | Rate: {rate_display} | Skin: {skin_display}", flush=True)
+
                 # --- CSV LOGGING LOGIC ---
                 if web_server.ride_active and not is_logging:
                     if not os.path.exists("ride_logs"):
                         os.makedirs("ride_logs")
-                    
-                    # Generate a perfectly unique ride ID for Machine Learning sync
+
                     current_ride_id = "RIDE_" + datetime.now().strftime('%Y%m%d_%H%M%S')
                     web_server.last_ride_id = current_ride_id
-                    
+
+                    # Reset ML predictor state for the new ride
+                    sweat_predictor.reset()
+                    predictor_notified = False
+
                     filename = f"ride_logs/{current_ride_id}.csv"
                     csv_file = open(filename, 'w', newline='')
                     csv_writer = csv.writer(csv_file)
-                    csv_writer.writerow(["ride_id", "timestamp", "rpm", "speed_kph", "torque_nm", "voltage_out", "battery_voltage_v", "motor_current_a", "motor_power_w", "power_band", "temp_c", "humidity_pct", "fluid_loss_l", "sweat_rate_l_hr", "skin_temp_c"])
+                    csv_writer.writerow([
+                        "ride_id", "timestamp", "rpm", "speed_kph", "torque_nm",
+                        "voltage_out", "battery_voltage_v", "motor_current_a", "motor_power_w",
+                        "power_band", "temp_c", "humidity_pct", "fluid_loss_l",
+                        "sweat_rate_l_hr", "skin_temp_c",
+                        "ml_sweat_probability", "sweat_reduction_active"
+                    ])
                     is_logging = True
-                    print(f"\n[IoT] STARTED RECORDING {current_ride_id} TO {filename}")
-                
+                    print(f"\n[IoT] STARTED RECORDING {current_ride_id} — mode: {web_server.ride_mode}")
+
                 elif not web_server.ride_active and is_logging:
                     if csv_file:
                         csv_file.close()
                     is_logging = False
                     current_ride_id = None
                     print("\n[IoT] STOPPED RECORDING AND SAVED CSV")
-                
+
                 if is_logging and csv_writer:
                     row_data = {
                         "ride_id": current_ride_id,
@@ -583,26 +739,29 @@ def main():
                         "battery_voltage_v": round(current_battery_voltage_v, 2),
                         "motor_current_a": round(current_motor_amps_a, 2),
                         "motor_power_w": round(current_motor_power_w, 2),
-                        "power_band": config.CURRENT_POWER_BAND,
+                        "power_band": current_power_band,
                         "temp_c": round(current_temp_c, 2),
                         "humidity_pct": round(current_humid_pct, 2),
                         "fluid_loss_l": round(hdrop_manager.current_fluid_l, 4) if hdrop_manager.current_fluid_l is not None else None,
                         "sweat_rate_l_hr": round(hdrop_manager.current_sweat_rate_l_hr, 4) if hdrop_manager.current_sweat_rate_l_hr is not None else None,
-                        "skin_temp_c": round(hdrop_manager.current_skin_temp_c, 2) if hdrop_manager.current_skin_temp_c is not None else None
+                        "skin_temp_c": round(hdrop_manager.current_skin_temp_c, 2) if hdrop_manager.current_skin_temp_c is not None else None,
+                        "ml_sweat_probability": round(ml_probability, 4),
+                        "sweat_reduction_active": in_sweat_reduction,
                     }
-                    
+
                     csv_writer.writerow([
-                        row_data["ride_id"], row_data["timestamp"], row_data["rpm"], 
-                        row_data["speed_kph"], row_data["torque_nm"], row_data["voltage_out"], 
+                        row_data["ride_id"], row_data["timestamp"], row_data["rpm"],
+                        row_data["speed_kph"], row_data["torque_nm"], row_data["voltage_out"],
                         row_data["battery_voltage_v"], row_data["motor_current_a"], row_data["motor_power_w"],
-                        row_data["power_band"], row_data["temp_c"], row_data["humidity_pct"], 
-                        row_data["fluid_loss_l"], row_data["sweat_rate_l_hr"], row_data["skin_temp_c"]
+                        row_data["power_band"], row_data["temp_c"], row_data["humidity_pct"],
+                        row_data["fluid_loss_l"], row_data["sweat_rate_l_hr"], row_data["skin_temp_c"],
+                        row_data["ml_sweat_probability"], row_data["sweat_reduction_active"],
                     ])
-                    csv_file.flush() # Ensure it writes to SD card instantly
-                    
-                    # Fire into the cloud queue (won't block this 50ms loop)
-                    cloud_queue.put(row_data)
-                    csv_file.flush() # Ensure it writes to SD card instantly
+                    csv_file.flush()
+
+                    # Route to correct Supabase table based on ride mode
+                    supabase_table = "actuation_ride_metrics_v1" if web_server.ride_mode == "ACTUATION" else "ride_metrics_v2"
+                    cloud_queue.put((supabase_table, row_data))
             setattr(main, "counter", getattr(main, "counter", 0) + 1)
 
             # Loop Sleep
