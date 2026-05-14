@@ -2,6 +2,7 @@ import os
 import sys
 import pandas as pd
 import numpy as np
+import json
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -386,9 +387,38 @@ def main():
         print("  ✅ Test accuracy has plateaued — more data is unlikely to help, focus on features.")
 
     # 10. Export the Model for the Raspberry Pi
+    # Two files are needed for deployment:
+    #   digital_twin_model.pkl  — the trained Random Forest
+    #   model_config.json       — feature order, threshold, and metadata
+    #                             the Pi inference code must load both
+
+    # Standard decision threshold: predict sweating when model confidence > 50%.
+    DEPLOYMENT_THRESHOLD = 0.50
+
     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'digital_twin_model.pkl')
     joblib.dump(clf, model_path)
-    print(f"-> Exported Lightweight Edge Model to: {model_path}")
+    print(f"-> Exported model: {model_path}")
+
+    config = {
+        'feature_cols':        feature_cols,
+        'deployment_threshold': DEPLOYMENT_THRESHOLD,
+        'n_training_rides':    int(len(train_ids)),
+        'n_training_rows':     int(len(X_train)),
+        'auc':                 round(float(roc_auc), 4),
+        'cv_accuracy_mean':    round(float(mean_cv), 4),
+        'cv_accuracy_std':     round(float(std_cv),  4),
+        'training_date':       pd.Timestamp.now().strftime('%Y-%m-%d'),
+        'notes': (
+            'Features must be computed in the order listed in feature_cols. '
+            'exertion_debt_kj and exertion_intensity_kj_per_min are cumulative '
+            'from ride start. torque_rolling_3min is a 3-minute rolling mean '
+            'of torque_nm. All features are computed at ~1s resolution.'
+        )
+    }
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_config.json')
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    print(f"-> Exported config:  {config_path}")
     
     print("\n✅ Step 4 Complete. You now have a working AI ready for edge deployment!")
 

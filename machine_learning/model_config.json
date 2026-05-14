@@ -1,0 +1,17 @@
+{
+  "feature_cols": [
+    "exertion_debt_kj",
+    "exertion_intensity_kj_per_min",
+    "humidity_pct",
+    "temp_c",
+    "torque_rolling_3min"
+  ],
+  "deployment_threshold": 0.3,
+  "n_training_rides": 21,
+  "n_training_rows": 37837,
+  "auc": 0.8936,
+  "cv_accuracy_mean": 0.7892,
+  "cv_accuracy_std": 0.05,
+  "training_date": "2026-05-13",
+  "notes": "Features must be computed in the order listed in feature_cols. exertion_debt_kj and exertion_intensity_kj_per_min are cumulative from ride start. torque_rolling_3min is a 3-minute rolling mean of torque_nm. All features are computed at ~1s resolution."
+}
