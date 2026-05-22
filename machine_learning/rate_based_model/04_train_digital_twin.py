@@ -23,7 +23,7 @@ def main():
     print("="*60)
     print(" STEP 4: TRAINING THE DIGITAL TWIN (Edge ML Prototype)")
     print("="*60)
-    
+
     # 1. Load the pristine engineering dataset we built in Step 2
     csv_path     = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_ready_dataset.csv')
     graphics_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'graphics')
@@ -31,10 +31,10 @@ def main():
     if not os.path.exists(csv_path):
         print(f"Error: {csv_path} not found. Run Step 2 (Feature Engineering) first!")
         return
-        
+
     df = pd.read_csv(csv_path)
     print(f"Loaded dataset with {len(df)} 50ms interval rows.")
-    
+
     # 2. Select the Features to feed the AI (Drop text IDs and Target variables)
     feature_cols = [
         'exertion_debt_kj',
@@ -43,13 +43,13 @@ def main():
         'temp_c',
         'torque_rolling_3min',
     ]
-    
+
     # Drop rows if they have NAs in our critical feature columns
     df = df.dropna(subset=feature_cols + ['is_sweating'])
-    
+
     X = df[feature_cols]
     y = df['is_sweating']
-    
+
     print(f"\nTraining on {len(X)} pristine rows across {len(feature_cols)} engineered features...")
 
     # 3. Ride-level Train/Test Split
@@ -70,24 +70,24 @@ def main():
     X_test,  y_test  = df.loc[test_mask,  feature_cols], df.loc[test_mask,  'is_sweating']
 
     print(f"  Training rows: {len(X_train)} | Test rows: {len(X_test)}")
-    
+
     # 4. INITIALIZE THE MODEL
     # We use a Random Forest because it compiles incredibly small for the Raspberry Pi Edge execution
     # and it handles non-linear human physics natively without scaling requirements.
     clf = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1,
                                  class_weight='balanced')
-    
+
     print("\nTraining Random Forest Model... (This is where the AI learns your physiology!)")
     clf.fit(X_train, y_train)
-    
+
     # 5. Evaluate the Model on the 20% unseen test data
     y_pred = clf.predict(X_test)
     acc = accuracy_score(y_test, y_pred)
-    
+
     print("\n" + "="*45)
     print(f"  MODEL ACCURACY ON UNSEEN DATA: {acc * 100:.2f}%")
     print("="*45)
-    
+
     print("\nClassification Report (Precision & Recall):")
     print(classification_report(y_test, y_pred, target_names=["Dry/Comfortable", "Sweat Threshold Reached"]))
 
@@ -141,7 +141,7 @@ def main():
         print("  ⚠️  AUC in moderate range — class_weight='balanced' may help; more data likely needed.")
     else:
         print("  ✅ AUC above 0.85 — model has strong discriminative ability.")
-    
+
     # --- Temporal Prediction Plot (one test ride) ---
     # Shows predicted probability vs actual label over real time.
     # This is the most operationally meaningful plot: did the model detect sweat onset
@@ -285,11 +285,11 @@ def main():
 
     importances = clf.feature_importances_
     sorted_indices = np.argsort(importances)[::-1]
-    
+
     print("\nFEATURE IMPORTANCE RANKING:")
     for i in sorted_indices:
         print(f"{feature_cols[i]:>25}: {importances[i]*100:.1f}%")
-        
+
     # Plot Feature Importances
     plt.figure(figsize=(12, 6))
     plt.title("Digital Twin Feature Importance (% influence on Sweat Prediction)")
@@ -298,11 +298,11 @@ def main():
     plt.ylabel("Importance (%)")
     plt.grid(axis='y', linestyle='--', alpha=0.3)
     plt.tight_layout()
-    
+
     plot_path = os.path.join(graphics_dir, '04_feature_importance.png')
     plt.savefig(plot_path)
     print(f"\n-> Saved Feature Importance Graph: {plot_path}")
-    
+
     # 8. Cross-Validation (ride-level)
     # GroupKFold ensures rides are never split across train/test within a fold —
     # the same principle as our ride-level split above, applied 5 times over.
@@ -419,7 +419,7 @@ def main():
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
     print(f"-> Exported config:  {config_path}")
-    
+
     print("\n✅ Step 4 Complete. You now have a working AI ready for edge deployment!")
 
 if __name__ == "__main__":

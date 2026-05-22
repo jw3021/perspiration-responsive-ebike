@@ -5,15 +5,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 import re
 
+# Thesis style
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import plot_style
+plot_style.apply()
+
 # Set up paths to safely import Supabase credentials from the global config
 try:
-    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.py')
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config.py')
     with open(config_path, 'r') as f:
         config_text = f.read()
-        
+
     SUPABASE_URL = re.search(r'SUPABASE_URL\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
     SUPABASE_KEY = re.search(r'SUPABASE_KEY\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
-    
+
     from supabase import create_client
 except Exception as e:
     print(f"Error loading Supabase credentials: {e}")
@@ -42,48 +47,55 @@ def fetch_macro_telemetry(client):
         if len(data) < chunk_size:
             break
         start += chunk_size
-    
+
     df = pd.DataFrame(all_data)
     if df.empty:
         return pd.DataFrame()
-        
+
     # Force numbers and calculate the total fluid loss (which is just the peak value reached in that session)
     df['fluid_loss_l'] = pd.to_numeric(df['fluid_loss_l'], errors='coerce')
     macro_df = df.groupby('ride_id')['fluid_loss_l'].max().reset_index()
     macro_df.rename(columns={'fluid_loss_l': 'total_fluid_loss_l'}, inplace=True)
     return macro_df
 
+def print_ride_table(merged_df):
+    df = merged_df.copy()
+    df['sweat_perception_score'] = pd.to_numeric(df['sweat_perception_score'], errors='coerce')
+    df['total_fluid_loss_l'] = pd.to_numeric(df['total_fluid_loss_l'], errors='coerce')
+    df = df.sort_values('total_fluid_loss_l', ascending=False)
+    print("\n  Rides sorted by total fluid loss:")
+    print(f"  {'Ride ID':<32} {'Fluid Loss (L)':>15} {'Survey Score':>13}")
+    print("  " + "-"*62)
+    for _, row in df.iterrows():
+        print(f"  {row['ride_id']:<32} {row['total_fluid_loss_l']:>15.3f} {int(row['sweat_perception_score']):>13}")
+
 def plot_correlation(merged_df, output_dir):
     print("Generating biological vs subjective Scatter Plot...")
-    
+
     plt.figure(figsize=(10, 6))
-    
+
     x = merged_df['total_fluid_loss_l'].fillna(0)
     y = pd.to_numeric(merged_df['sweat_perception_score'], errors='coerce')
-    
-    # Plot real historic rides
-    plt.scatter(x, y, color='#2ECC71', s=120, alpha=0.9, edgecolors='black', label='Historical Rides')
-    
-    # Calculate linear trendline (Line of Best Fit) if we have enough points
+
+    plt.scatter(x, y, color=plot_style.PRIMARY, s=120, alpha=0.4,
+                edgecolors=plot_style.DARK_BLUE, linewidths=0.8, label='Historical Rides')
+
     if len(merged_df) > 1:
         z = np.polyfit(x, y, 1)
         p = np.poly1d(z)
-        plt.plot(x, p(x), "r--", linewidth=2.5, alpha=0.7, label="Physiological Trendline")
-    
-    plt.title("Correlation Proof: Objective Fluid Loss vs. Subjective Perception", fontsize=14, fontweight='bold')
-    plt.xlabel("Total Fluid Loss Measured by Wearable (Litres)", fontsize=12)
-    plt.ylabel("Subjective Output: Survey Score (1-5)", fontsize=12)
-    
-    # Format Y axis elegantly
+        plt.plot(x, p(x), color=plot_style.ACCENT,
+                 linewidth=2.0, alpha=0.85, label='Physiological Trendline')
+
+    plt.xlabel("Total Fluid Loss Measured by Wearable (Litres)")
+    plt.ylabel("Post-Ride Sweat Survey Score (1–5)")
     plt.yticks([1, 2, 3, 4, 5], ['1 (Dry)', '2 (Light)', '3 (Moderate)', '4 (Heavy)', '5 (Max)'])
     plt.ylim(0.5, 5.5)
-    plt.grid(True, linestyle='--', alpha=0.3)
-    plt.legend(loc='lower right')
-    
+    plt.legend(loc='upper left')
+
     output_path = os.path.join(output_dir, '03_survey_correlation_plot.png')
     plt.savefig(output_path, bbox_inches='tight')
     plt.close()
-    
+
     print(f"-> Saved Correlational Plot: {output_path}")
 
 def analyse_threshold(merged_df):
@@ -160,8 +172,16 @@ def main():
         print("Not enough data to cross-reference tables.")
         return
 
+    # Rides excluded due to sensor faults or corrupted data (not short/dry rides — those are valid)
+    EXCLUDED_RIDES = {
+        'RIDE_20260416_102808',  # torque sensor fault (117.3 Nm avg — hardware error)
+        'RIDE_20260331_151943',  # HDrop not reset between sessions — fluid loss carried over from prior ride
+        'RIDE_20260330_155917',  # 0.55 L fluid loss with survey score 2 (Light) — inconsistent
+    }
+
     # Perform strict INNER JOIN to ensure we only plot rides that have both biological data AND a survey score
     merged_df = pd.merge(telemetry_df, surveys_df, on='ride_id', how='inner')
+    merged_df = merged_df[~merged_df['ride_id'].isin(EXCLUDED_RIDES)]
 
     print(f"\n✅ Matched {len(merged_df)} distinct rides that contain both a Survey Score and Telemetry.")
 
@@ -171,6 +191,7 @@ def main():
         return
 
     output_dir = os.path.dirname(os.path.abspath(__file__))
+    print_ride_table(merged_df)
     plot_correlation(merged_df, output_dir)
     analyse_threshold(merged_df)
     print("\nNext steps: Open the generated PNG to visually prove your personalized biological threshold!")
