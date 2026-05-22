@@ -50,9 +50,17 @@ def main():
     print("  MASTERS PROJECT: E-BIKE DATA COLLECTION DASHBOARD")
     print("=" * 60)
     
+    # Rides excluded due to sensor faults or corrupted data
+    EXCLUDED_RIDES = {
+        'RIDE_20260416_102808',  # torque sensor fault (117.3 Nm avg — hardware error)
+        'RIDE_20260331_151943',  # HDrop not reset between sessions — fluid loss carried over from prior ride
+        'RIDE_20260330_155917',  # 0.55 L fluid loss with survey score 2 (Light) — inconsistent
+    }
+
     client = create_client(SUPABASE_URL, SUPABASE_KEY)
     df = fetch_all_data(client)
-    
+    df = df[~df['ride_id'].isin(EXCLUDED_RIDES)]
+
     if df.empty:
         print("\n>>> NO DATA FOUND! The 'ride_metrics_v2' table is completely empty.")
         print(">>> Go ride your bike and generate some sweat! 🚴💧")
