@@ -59,9 +59,16 @@ def main():
     X = df[FEATURE_COLS]
     y = df[TARGET_COL]
 
-    # Ride-level train/test split
+    # Ride-level train/test split — stratified so test set has same ratio of
+    # threshold-crossing rides as the full dataset
     all_ride_ids = df['ride_id'].unique()
-    train_ids, test_ids = train_test_split(all_ride_ids, test_size=0.2, random_state=42)
+    ride_crossed = [
+        int(df.loc[df['ride_id'] == r, TARGET_COL].max())
+        for r in all_ride_ids
+    ]
+    train_ids, test_ids = train_test_split(
+        all_ride_ids, test_size=0.2, random_state=42, stratify=ride_crossed
+    )
 
     print(f"\nRide-level split: {len(train_ids)} train / {len(test_ids)} test")
     print(f"  Train: {sorted(train_ids)}")
@@ -234,8 +241,8 @@ def main():
     config = {
         'feature_cols':          FEATURE_COLS,
         'target':                TARGET_COL,
-        'personal_threshold_l':  0.301,
-        'deployment_threshold':  0.50,
+        'personal_threshold_l':  0.17,
+        'deployment_threshold':  0.20,
         'n_training_rides':      int(len(train_ids)),
         'n_training_rows':       int(len(X_train)),
         'auc':                   round(float(roc_auc), 4),

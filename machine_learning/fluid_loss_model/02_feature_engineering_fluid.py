@@ -26,7 +26,7 @@ EXCLUDED_RIDES = {
 
 # Personalised fluid loss threshold derived from survey midpoint (rating 2→3)
 # Source: 03_eda_macro_survey.py — mean fluid loss at rating 2 = 0.240 L, rating 3 = 0.363 L
-PERSONAL_FLUID_THRESHOLD = 0.2  # litres
+PERSONAL_FLUID_THRESHOLD = 0.17  # litres
 
 
 def fetch_all_data(client):

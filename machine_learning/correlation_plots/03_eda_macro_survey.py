@@ -86,6 +86,23 @@ def plot_correlation(merged_df, output_dir):
         plt.plot(x, p(x), color=plot_style.ACCENT,
                  linewidth=2.0, alpha=0.85, label='Physiological Trendline')
 
+        # Crossing point: where trendline crosses y=2 (onset of light sweating)
+        x_cross = (2 - z[1]) / z[0]
+        print(f"  Trendline crosses rating 2 at: {x_cross:.3f} L")
+
+        ax = plt.gca()
+        # Vertical line — clip_on=False so it runs into the white margin below the axis
+        ax.plot([x_cross, x_cross], [0.5, 2], color=plot_style.NEUTRAL,
+                linestyle='--', linewidth=1.0, zorder=2, clip_on=False)
+        # Horizontal reference line at y=2
+        ax.plot([0, x_cross], [2, 2], color=plot_style.NEUTRAL,
+                linestyle='--', linewidth=1.0, zorder=2)
+        # Dot at intersection
+        ax.scatter([x_cross], [2], color=plot_style.ACCENT, s=50, zorder=5)
+        # Label in the empty space between y=1 and y=2, left of the vertical line
+        ax.text(x_cross - 0.01, 1.4, f'{x_cross:.2f} L',
+                fontsize=8.5, ha='right', va='center', color=plot_style.NEUTRAL)
+
     plt.xlabel("Total Fluid Loss Measured by Wearable (Litres)")
     plt.ylabel("Post-Ride Sweat Survey Score (1–5)")
     plt.yticks([1, 2, 3, 4, 5], ['1 (Dry)', '2 (Light)', '3 (Moderate)', '4 (Heavy)', '5 (Max)'])

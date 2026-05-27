@@ -382,7 +382,13 @@ class CloudSyncManager(threading.Thread):
             except queue.Empty:
                 pass
             except Exception as e:
-                print(f"[Supabase Upload Error] {e}")
+                print(f"[Supabase Upload Error] {e} — re-queuing {len(batch)} rows")
+                try:
+                    for row in batch:
+                        self.queue.put((table_name, row))
+                    time.sleep(5)
+                except Exception:
+                    pass
 
 class SweatPredictor:
     """
@@ -409,7 +415,7 @@ class SweatPredictor:
         try:
             base = os.path.dirname(os.path.abspath(__file__))
             model_path  = os.path.join(base, config.ML_MODEL_PATH)
-            config_path = os.path.join(base, 'machine_learning', 'model_config.json')
+            config_path = os.path.join(base, 'machine_learning', 'fluid_loss_model', 'model_config_fluid.json')
             self.model = joblib.load(model_path)
             with open(config_path) as f:
                 mc = json.load(f)
@@ -483,7 +489,7 @@ class SweatPredictor:
 
 def sweat_reduction_ceiling(speed_kph):
     """Speed-dependent voltage ceiling for sweat reduction mode.
-    4.5V at standstill, linear taper to 3.0V at 12 km/h, flat 3.0V thereafter."""
+    4.5V at standstill, linear taper to 3.5V at 12.5 km/h, flat 3.5V thereafter."""
     if speed_kph < config.COLD_START_CUTOFF_KPH:
         t = speed_kph / config.COLD_START_CUTOFF_KPH
         return config.SWEAT_REDUCTION_MAX_V - t * (config.SWEAT_REDUCTION_MAX_V - config.SWEAT_REDUCTION_CRUISE_V)
@@ -567,6 +573,9 @@ def main():
     # State for smoothing
     smoothed_torque = 0.0
     torque_history = []
+
+    # Voltage ceiling ramp state — starts at normal ceiling, ramps up when sweat reduction fires
+    current_v_ceiling = config.MOTOR_MAX_OUTPUT_V
     
     # Loop Logic
     loop_interval = 0.05 # 50ms loop
@@ -646,9 +655,16 @@ def main():
                 # Note: We map 0% assist to MOTOR_MIN_ASSIST_V (1.5V) so the motor responds instantly!
                 v_out_min = config.MOTOR_MIN_ASSIST_V
                 if web_server.ride_mode == "ACTUATION" and sweat_predictor.triggered:
-                    v_out_max = sweat_reduction_ceiling(current_speed_kph)
+                    target_ceiling = sweat_reduction_ceiling(current_speed_kph)
                 else:
-                    v_out_max = config.MOTOR_MAX_OUTPUT_V  # 2.5V normal ceiling
+                    target_ceiling = config.MOTOR_MAX_OUTPUT_V  # 2.5V normal ceiling
+
+                # Ramp current_v_ceiling toward target_ceiling rather than jumping instantly
+                if current_v_ceiling < target_ceiling:
+                    current_v_ceiling = min(current_v_ceiling + config.SWEAT_REDUCTION_RAMP_RATE_V_PER_S, target_ceiling)
+                elif current_v_ceiling > target_ceiling:
+                    current_v_ceiling = max(current_v_ceiling - config.SWEAT_REDUCTION_RAMP_RATE_V_PER_S, target_ceiling)
+                v_out_max = current_v_ceiling
                 
                 # Final Voltage
                 target_voltage = v_out_min + (assist_factor * (v_out_max - v_out_min))
