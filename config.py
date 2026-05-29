@@ -60,19 +60,25 @@ ASSIST_LEVEL_FACTOR = 1.0   # Multiplier for assist strength (Tune as needed)
 MAX_TORQUE_INPUT_NM = 60.0  # Cap input torque for calculations
 
 # --- ML ACTUATION PARAMETERS ---
-ML_MODEL_PATH = "machine_learning/digital_twin_model.pkl"
+ML_MODEL_PATH = "machine_learning/sweat_onset_model/sweat_onset_model.pkl"
 
 # Sweat onset trigger: model must predict sweat continuously for this many
 # seconds before actuation fires, preventing single-spike false positives.
 SWEAT_ONSET_SUSTAINED_SECONDS = 30
 
+# When sweat reduction mode activates, ramp the voltage ceiling up gradually
+# rather than jumping instantly. Units: Volts per second.
+# At 0.1 V/s the ceiling takes ~10 s to rise from 2.5V to 3.5V.
+SWEAT_REDUCTION_RAMP_RATE_V_PER_S = 0.1
+
 # Probability threshold above which a single reading counts as a sweat prediction
-SWEAT_ONSET_PROBABILITY_THRESHOLD = 0.5
+SWEAT_ONSET_PROBABILITY_THRESHOLD = 0.20
 
 # Sweat reduction mode voltage profile (speed-dependent ceiling)
-COLD_START_CUTOFF_KPH  = 12.0  # Speed at which cold-start taper ends
+COLD_START_CUTOFF_KPH  = 12.5  # Speed at which cold-start taper ends (midpoint of 0–25 km/h range)
 SWEAT_REDUCTION_MAX_V  = 4.5   # Ceiling at standstill (full cold-start assist)
-SWEAT_REDUCTION_CRUISE_V = 3.0 # Ceiling above COLD_START_CUTOFF_KPH (sustained elevated assist)
+SWEAT_REDUCTION_CRUISE_V = 3.5 # Ceiling above COLD_START_CUTOFF_KPH (sustained elevated assist)
+SWEAT_REDUCTION_LAUNCH_KPH = 2.0  # Min speed before cold-start ceiling (>3.5V) is permitted; at standstill there is no back-EMF so the motor draws stall current and trips the CA
 
 # --- IOT CLOUD CONFIGURATION ---
 SUPABASE_URL = "https://ljjuacwtjcvqxrtqomrn.supabase.co"

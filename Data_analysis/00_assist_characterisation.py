@@ -61,7 +61,7 @@ def plot_speed_ceiling(output_dir):
     COLD_START_CUTOFF_KPH = 12.5
     V_NORMAL      = 2.5
     V_MAX         = 4.5
-    V_SWEAT_CRUISE = 3.0
+    V_SWEAT_CRUISE = 3.5
 
     speed_range = np.linspace(0, 25, 500)
 
@@ -84,7 +84,7 @@ def plot_speed_ceiling(output_dir):
     ax.axvspan(0, COLD_START_CUTOFF_KPH, color=plot_style.LIGHT_BLUE, alpha=0.12, zorder=0)
 
     ax.text(COLD_START_CUTOFF_KPH + 0.5, 1.1,
-            f"← Cold-start zone (~{int(COLD_START_CUTOFF_KPH)} km/h)",
+            f"← Cold-start zone (~{COLD_START_CUTOFF_KPH} km/h)",
             fontsize=8, color=plot_style.NEUTRAL, ha="left", va="bottom")
 
     ax.set_xlabel("Speed (km/h)")
