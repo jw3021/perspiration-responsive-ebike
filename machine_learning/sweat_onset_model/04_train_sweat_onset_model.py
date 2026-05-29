@@ -43,9 +43,9 @@ def main():
     graphics_dir = os.path.join(base_dir, 'graphics')
     os.makedirs(graphics_dir, exist_ok=True)
 
-    csv_path = os.path.join(base_dir, 'ml_ready_dataset_fluid.csv')
+    csv_path = os.path.join(base_dir, 'training_dataset.csv')
     if not os.path.exists(csv_path):
-        print(f"Error: {csv_path} not found. Run 02_feature_engineering_fluid.py first.")
+        print(f"Error: {csv_path} not found. Run 02_feature_engineering.py first.")
         return
 
     df = pd.read_csv(csv_path)
@@ -103,14 +103,18 @@ def main():
 
     # Confusion matrix
     cm = confusion_matrix(y_test, y_pred, normalize='true')
-    fig, ax = plt.subplots(figsize=(5.5, 4.5))
+    fig, ax = plt.subplots(figsize=(4.2, 3.5))
     ConfusionMatrixDisplay(cm, display_labels=["Below threshold", "Above threshold"]).plot(
-        ax=ax, cmap=plot_style.thesis_cmap, values_format='.2%', colorbar=False
+        ax=ax, cmap=plot_style.confusion_cmap, values_format='.2%', colorbar=False,
+        text_kw={'fontsize': 11, 'fontweight': 'bold'}
     )
     ax.grid(False)
     for spine in ax.spines.values():
         spine.set_visible(True)
         spine.set_linewidth(0.6)
+    ax.tick_params(axis='both', labelsize=8.5)
+    ax.set_xlabel('Predicted label', fontsize=11)
+    ax.set_ylabel('True label', fontsize=11)
     plt.tight_layout()
     plt.savefig(os.path.join(graphics_dir, '04_confusion_matrix.png'))
     plt.close()
@@ -235,7 +239,7 @@ def main():
         print("  ✅ Test accuracy has plateaued — focus on features rather than more data.")
 
     # Export model
-    model_path = os.path.join(base_dir, 'digital_twin_model_fluid.pkl')
+    model_path = os.path.join(base_dir, 'sweat_onset_model.pkl')
     joblib.dump(clf, model_path)
 
     config = {
@@ -250,7 +254,7 @@ def main():
         'cv_accuracy_std':       round(float(std_cv),  4),
         'training_date':         pd.Timestamp.now().strftime('%Y-%m-%d'),
     }
-    config_path = os.path.join(base_dir, 'model_config_fluid.json')
+    config_path = os.path.join(base_dir, 'model_config.json')
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
 

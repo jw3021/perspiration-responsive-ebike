@@ -116,7 +116,7 @@ def main():
     available_cols = [c for c in ml_columns if c in global_df.columns]
     final_df = global_df[available_cols]
 
-    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_ready_dataset_fluid.csv')
+    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'training_dataset.csv')
     final_df.to_csv(output_path, index=False)
 
     n_rides = final_df['ride_id'].nunique()

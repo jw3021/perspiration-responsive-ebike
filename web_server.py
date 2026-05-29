@@ -36,9 +36,10 @@ HTML_TEMPLATE = """
             font-weight: bold;
             letter-spacing: 0.3px;
         }
-        .status-idle     { background: #1e1e1e; color: #888; }
+        .status-idle       { background: #1e1e1e; color: #888; }
         .status-actuation  { background: #1a2e1a; color: #2ECC71; border: 1px solid #2ECC71; }
-        .status-datacoll { background: #1a1f2e; color: #5B9BD5; border: 1px solid #5B9BD5; }
+        .status-motortest  { background: #2e1e0a; color: #E67E22; border: 1px solid #E67E22; }
+        .status-datacoll   { background: #1a1f2e; color: #5B9BD5; border: 1px solid #5B9BD5; }
 
         .mode-label {
             font-size: 11px;
@@ -77,6 +78,10 @@ HTML_TEMPLATE = """
 
         .btn-actuation {
             background: linear-gradient(135deg, #27AE60, #1E8449);
+            color: white;
+        }
+        .btn-motortest {
+            background: linear-gradient(135deg, #E67E22, #A04000);
             color: white;
         }
         .btn-datacoll {
@@ -170,6 +175,15 @@ HTML_TEMPLATE = """
         <div class="mode-header" style="color:#444; font-size:13px; margin: 4px 0;">— or —</div>
 
         <div class="mode-section">
+            <div class="mode-header">Motor Test (Forced Sweat Reduction)</div>
+            <button class="btn btn-motortest" onclick="startRide('MOTOR_TEST')">
+                ▶ START MOTOR TEST
+            </button>
+        </div>
+
+        <div class="mode-header" style="color:#444; font-size:13px; margin: 4px 0;">— or —</div>
+
+        <div class="mode-section">
             <div class="mode-header">Data Collection Ride</div>
             <button class="btn btn-datacoll" onclick="startRide('DATA_COLLECTION')">
                 ▶ START DATA COLLECTION RIDE
@@ -217,6 +231,10 @@ HTML_TEMPLATE = """
                 box.classList.add('status-actuation');
                 label.innerText = 'ACTUATION MODE';
                 text.innerText  = 'ML model running — sweat onset monitoring active';
+            } else if (mode === 'MOTOR_TEST') {
+                box.classList.add('status-motortest');
+                label.innerText = 'MOTOR TEST MODE';
+                text.innerText  = 'Sweat reduction forced ON — no ML required';
             } else {
                 box.classList.add('status-datacoll');
                 label.innerText = 'DATA COLLECTION MODE';

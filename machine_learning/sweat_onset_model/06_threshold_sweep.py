@@ -76,9 +76,9 @@ def main():
     graphics_dir = os.path.join(base_dir, 'graphics')
     os.makedirs(graphics_dir, exist_ok=True)
 
-    csv_path = os.path.join(base_dir, 'ml_ready_dataset_fluid.csv')
+    csv_path = os.path.join(base_dir, 'training_dataset.csv')
     if not os.path.exists(csv_path):
-        print("Error: ml_ready_dataset_fluid.csv not found. Run 02_feature_engineering_fluid.py first.")
+        print("Error: training_dataset.csv not found. Run 02_feature_engineering.py first.")
         return
 
     df = pd.read_csv(csv_path)

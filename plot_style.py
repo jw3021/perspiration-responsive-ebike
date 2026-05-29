@@ -20,7 +20,8 @@ LIGHT_BLUE = '#7A9DC1'   # pale blue    — fills, confidence bands
 PALETTE = [PRIMARY, ACCENT, LIGHT_BLUE, DARK_BLUE, NEUTRAL]
 
 # ── Custom colourmaps ───────────────────────────────────────────────────────
-thesis_cmap = LinearSegmentedColormap.from_list('thesis_blue', ['white', PRIMARY], N=256)
+thesis_cmap    = LinearSegmentedColormap.from_list('thesis_blue',      ['white', PRIMARY],    N=256)
+confusion_cmap = LinearSegmentedColormap.from_list('thesis_confusion', ['white', LIGHT_BLUE], N=256)
 
 # ── rcParams dict ───────────────────────────────────────────────────────────
 _RC = {

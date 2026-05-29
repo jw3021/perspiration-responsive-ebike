@@ -287,8 +287,92 @@ def plot_ride(df, ride_id):
     print(f"Plot saved: {output_path}")
 
 
+def plot_power_reduction(df, ride_id, bin_seconds=30):
+    """
+    Second output plot: rider leg power in discrete time bins, split at the ML trigger.
+    Leg power = torque_nm * rpm * 0.10472  (W)
+    Shows whether the increased motor assist allowed the rider to reduce personal effort.
+    """
+    # Leg power (rider mechanical input)
+    df = df.copy()
+    df["leg_power_w"] = df["torque_nm"] * df["rpm"] * 0.10472
+
+    # Work out trigger time
+    trigger_min = None
+    if "sweat_reduction_active" in df.columns and df["sweat_reduction_active"].any():
+        trigger_min = df.loc[df["sweat_reduction_active"], "elapsed_min"].iloc[0]
+
+    if trigger_min is None:
+        print("No actuation trigger found — skipping power reduction plot.")
+        return
+
+    # Bin into discrete windows
+    bin_min = bin_seconds / 60.0
+    df["bin"] = (df["elapsed_min"] / bin_min).apply(int) * bin_min
+
+    binned = (
+        df.groupby("bin")["leg_power_w"]
+        .mean()
+        .reset_index()
+        .rename(columns={"bin": "bin_start_min", "leg_power_w": "avg_leg_power_w"})
+    )
+
+    before = binned[binned["bin_start_min"] < trigger_min]
+    after  = binned[binned["bin_start_min"] >= trigger_min]
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    bar_width = bin_min * 0.85
+
+    ax.bar(before["bin_start_min"], before["avg_leg_power_w"],
+           width=bar_width, align='edge',
+           color=plot_style.PRIMARY, alpha=0.55, edgecolor='white', linewidth=0.4,
+           label='Before actuation')
+    ax.bar(after["bin_start_min"], after["avg_leg_power_w"],
+           width=bar_width, align='edge',
+           color=plot_style.ACCENT, alpha=0.55, edgecolor='white', linewidth=0.4,
+           label='After actuation')
+
+    ax.set_xlim(left=0)
+
+    ax.axvline(trigger_min, color=plot_style.NEUTRAL, linestyle='--',
+               linewidth=1.2, label=f'ML trigger ({trigger_min:.1f} min)')
+
+    # Mean lines — same color as bars, solid, full opacity so they read as the mean of their group
+    x_max = df["elapsed_min"].max()
+    if not before.empty:
+        pre_mean = before["avg_leg_power_w"].mean()
+        ax.plot([0, trigger_min], [pre_mean, pre_mean],
+                color=plot_style.PRIMARY, linestyle='-', linewidth=2.2,
+                zorder=3, label='Pre mean')
+    if not after.empty:
+        post_mean = after["avg_leg_power_w"].mean()
+        ax.plot([trigger_min, x_max], [post_mean, post_mean],
+                color=plot_style.ACCENT, linestyle='-', linewidth=2.2,
+                zorder=3, label='Post mean')
+
+    ax.set_xlabel("Elapsed (min)", fontsize=12)
+    ax.set_ylabel("Avg rider leg power (W)", fontsize=12)
+    ax.legend(loc='upper right', fontsize=9)
+
+    # Print stats
+    if not before.empty and not after.empty:
+        delta = post_mean - pre_mean
+        print(f"\n  Pre-actuation avg leg power  : {pre_mean:.0f} W")
+        print(f"  Post-actuation avg leg power : {post_mean:.0f} W")
+        print(f"  Change                       : {delta:+.0f} W  ({delta/pre_mean*100:+.1f}%)\n")
+
+    plt.tight_layout()
+    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               f"{ride_id}_power_reduction.png")
+    fig.savefig(output_path)
+    plt.close(fig)
+    print(f"Plot saved: {output_path}")
+
+
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else None
     df, ride_id = fetch_ride(target)
     print_summary(df, ride_id)
     plot_ride(df, ride_id)
+    plot_power_reduction(df, ride_id)

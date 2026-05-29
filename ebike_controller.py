@@ -16,7 +16,7 @@ except ImportError:
     exit(1)
 import threading
 import web_server
-import hdrop_reader
+import sweat_sensor_reader
 import csv
 import os
 import json
@@ -255,12 +255,12 @@ class HDropManager(threading.Thread):
         
     def run(self):
         print("Initializing HDrop reader (Bluetooth / Android)...")
-        if not hdrop_reader.init_hdrop():
+        if not sweat_sensor_reader.init_hdrop():
             print("Warning: HDrop reader failed to initialize. Values will remain None")
             
         while self.running:
             try:
-                metrics = hdrop_reader.read_hdrop()
+                metrics = sweat_sensor_reader.read_hdrop()
                 val = metrics.get("fluid")
                 
                 if metrics.get("temp") is not None:
@@ -318,7 +318,7 @@ class HDropManager(threading.Thread):
                         if self.frozen_counter >= 20: # 5 minutes
                             print("\n[HDrop] WARNING: Android Accessibility Service has likely silently frozen!")
                             print("[HDrop] Commencing violent forced reset of Android USB ATX servers...")
-                            hdrop_reader.init_hdrop()
+                            sweat_sensor_reader.init_hdrop()
                             self.frozen_counter = 0  # Reset so it doesn't instantly crash again
 
                 else:
@@ -415,7 +415,7 @@ class SweatPredictor:
         try:
             base = os.path.dirname(os.path.abspath(__file__))
             model_path  = os.path.join(base, config.ML_MODEL_PATH)
-            config_path = os.path.join(base, 'machine_learning', 'fluid_loss_model', 'model_config_fluid.json')
+            config_path = os.path.join(base, 'machine_learning', 'sweat_onset_model', 'model_config.json')
             self.model = joblib.load(model_path)
             with open(config_path) as f:
                 mc = json.load(f)
@@ -636,36 +636,49 @@ def main():
             
             brakes_applied = (GPIO.input(config.GPIO_BRAKE_L) == GPIO.LOW) or (GPIO.input(config.GPIO_BRAKE_R) == GPIO.LOW)
             
+            # MOTOR_TEST mode forces sweat reduction on immediately (no ML required).
+            # ACTUATION mode uses the ML trigger latch as normal.
+            in_sweat_reduction = (
+                (web_server.ride_mode == "ACTUATION" and sweat_predictor.triggered) or
+                web_server.ride_mode == "MOTOR_TEST"
+            )
+
+            # Voltage ceiling ramp — runs every iteration so the ceiling decays while stopped,
+            # preventing a full-power surge when accelerating hard from a traffic light stop.
+            # While not pedalling in sweat reduction mode, target drops to cruise ceiling (3.5V)
+            # so the ceiling has to ramp back up on restart rather than sitting at 4.5V.
+            if in_sweat_reduction:
+                if is_pedaling and current_speed_kph >= config.SWEAT_REDUCTION_LAUNCH_KPH:
+                    target_ceiling = sweat_reduction_ceiling(current_speed_kph)
+                else:
+                    target_ceiling = config.SWEAT_REDUCTION_CRUISE_V
+            else:
+                target_ceiling = config.MOTOR_MAX_OUTPUT_V
+            if current_v_ceiling < target_ceiling:
+                current_v_ceiling = min(current_v_ceiling + config.SWEAT_REDUCTION_RAMP_RATE_V_PER_S, target_ceiling)
+            elif current_v_ceiling > target_ceiling:
+                current_v_ceiling = max(current_v_ceiling - config.SWEAT_REDUCTION_RAMP_RATE_V_PER_S, target_ceiling)
+
             if is_pedaling and is_torque_active and is_speed_safe and direction_forward and not brakes_applied:
                 # Calculate Assist Level (0.0 to 1.0)
-                
+
                 # Map Smoothed Torque (5 - 60 Nm)
                 torque_floor = config.MIN_TORQUE_NM
                 torque_ceiling = config.MAX_TORQUE_INPUT_NM
-                
+
                 # Normalize to an assist factor between 0.0 and 1.0
                 assist_factor = (smoothed_torque - torque_floor) / (torque_ceiling - torque_floor)
                 assist_factor = max(0.0, min(1.0, assist_factor))
-                
+
                 # Apply Global tuning multiplier (if user wants to scale down help)
                 assist_factor = assist_factor * config.ASSIST_LEVEL_FACTOR
                 assist_factor = max(0.0, min(1.0, assist_factor))
-                
+
                 # Apply to Voltage Range
                 # Note: We map 0% assist to MOTOR_MIN_ASSIST_V (1.5V) so the motor responds instantly!
                 v_out_min = config.MOTOR_MIN_ASSIST_V
-                if web_server.ride_mode == "ACTUATION" and sweat_predictor.triggered:
-                    target_ceiling = sweat_reduction_ceiling(current_speed_kph)
-                else:
-                    target_ceiling = config.MOTOR_MAX_OUTPUT_V  # 2.5V normal ceiling
-
-                # Ramp current_v_ceiling toward target_ceiling rather than jumping instantly
-                if current_v_ceiling < target_ceiling:
-                    current_v_ceiling = min(current_v_ceiling + config.SWEAT_REDUCTION_RAMP_RATE_V_PER_S, target_ceiling)
-                elif current_v_ceiling > target_ceiling:
-                    current_v_ceiling = max(current_v_ceiling - config.SWEAT_REDUCTION_RAMP_RATE_V_PER_S, target_ceiling)
                 v_out_max = current_v_ceiling
-                
+
                 # Final Voltage
                 target_voltage = v_out_min + (assist_factor * (v_out_max - v_out_min))
                 
@@ -701,15 +714,18 @@ def main():
                         predictor_notified = True
                         print(f"\n[ML] *** SWEAT ONSET CONFIRMED — switching to sweat reduction mode ***")
 
-                # Determine active power band label for logging
-                in_sweat_reduction = web_server.ride_mode == "ACTUATION" and sweat_predictor.triggered
                 current_power_band = "HIGH" if in_sweat_reduction else "LOW"
 
                 cache_flag = "*" if hdrop_manager.is_cached else ""
                 fluid_display = f"{hdrop_manager.current_fluid_l:.3f}L{cache_flag}" if hdrop_manager.current_fluid_l is not None else "None"
                 rate_display = f"{hdrop_manager.current_sweat_rate_l_hr:.3f}L/h{cache_flag}" if hdrop_manager.current_sweat_rate_l_hr is not None else "None"
                 skin_display = f"{hdrop_manager.current_skin_temp_c:.1f}°C" if hdrop_manager.current_skin_temp_c is not None else "None"
-                ml_display = f"{ml_probability:.2f}" if web_server.ride_mode == "ACTUATION" else "off"
+                if web_server.ride_mode == "MOTOR_TEST":
+                    ml_display = "forced"
+                elif web_server.ride_mode == "ACTUATION":
+                    ml_display = f"{ml_probability:.2f}"
+                else:
+                    ml_display = "off"
                 print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f} | Band: {current_power_band} | ML: {ml_display} | Fluid: {fluid_display} | Rate: {rate_display} | Skin: {skin_display}", flush=True)
 
                 # --- CSV LOGGING LOGIC ---
@@ -776,7 +792,7 @@ def main():
                     csv_file.flush()
 
                     # Route to correct Supabase table based on ride mode
-                    supabase_table = "actuation_ride_metrics_v1" if web_server.ride_mode == "ACTUATION" else "ride_metrics_v2"
+                    supabase_table = "actuation_ride_metrics_v1" if web_server.ride_mode in ("ACTUATION", "MOTOR_TEST") else "ride_metrics_v2"
                     cloud_queue.put((supabase_table, row_data))
             setattr(main, "counter", getattr(main, "counter", 0) + 1)
 
