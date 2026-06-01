@@ -10,6 +10,7 @@ Usage:
 
 import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -24,8 +25,7 @@ def fetch_ride(ride_id: str | None = None) -> pd.DataFrame:
     Fetch rows for the given ride_id, or the most recent ride if None.
     Returns a DataFrame sorted by timestamp.
     """
-    SUPABASE_URL = "https://ljjuacwtjcvqxrtqomrn.supabase.co"
-    SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqanVhY3d0amN2cXhydHFvbXJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTA5MDMsImV4cCI6MjA4OTU4NjkwM30.zmfCAMfbm8H2Zli5wbjGJEmkXkNy5UyKl0d3EQM-yzI"
+    from secrets import SUPABASE_URL, SUPABASE_KEY
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
     if ride_id is None:
