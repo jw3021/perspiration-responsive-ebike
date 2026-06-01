@@ -44,11 +44,11 @@ def plot_torque_voltage(torque_range, output_dir):
     ax.axvline(x=MAX_TORQUE_INPUT_NM, color=plot_style.NEUTRAL, linestyle='--',
                linewidth=1.2, label=f"Saturation ({int(MAX_TORQUE_INPUT_NM)} Nm)")
 
-    ax.set_xlabel("Rider input torque (Nm)")
-    ax.set_ylabel("DAC output voltage (V)")
+    ax.set_xlabel("Rider input torque (Nm)", fontsize=13)
+    ax.set_ylabel("DAC output voltage (V)", fontsize=13)
     ax.set_xlim(0, 70)
     ax.set_ylim(0.8, 5.0)
-    ax.legend(loc='upper left')
+    ax.legend(loc='upper left', fontsize=10)
 
     output_path = os.path.join(output_dir, "00_torque_voltage.png")
     fig.savefig(output_path)
@@ -84,14 +84,14 @@ def plot_speed_ceiling(output_dir):
     ax.axvspan(0, COLD_START_CUTOFF_KPH, color=plot_style.LIGHT_BLUE, alpha=0.12, zorder=0)
 
     ax.text(COLD_START_CUTOFF_KPH + 0.5, 1.1,
-            f"← Cold-start zone (~{COLD_START_CUTOFF_KPH} km/h)",
-            fontsize=8, color=plot_style.NEUTRAL, ha="left", va="bottom")
+            "← Cold-start zone",
+            fontsize=10, color=plot_style.NEUTRAL, ha="left", va="bottom")
 
-    ax.set_xlabel("Speed (km/h)")
-    ax.set_ylabel("Voltage ceiling (V)")
+    ax.set_xlabel("Speed (km/h)", fontsize=13)
+    ax.set_ylabel("Voltage ceiling (V)", fontsize=13)
     ax.set_xlim(0, 25)
     ax.set_ylim(0.8, 5.0)
-    ax.legend(loc="upper right")
+    ax.legend(loc="upper right", fontsize=10)
 
     output_path = os.path.join(output_dir, "00_speed_ceiling.png")
     fig.savefig(output_path)
