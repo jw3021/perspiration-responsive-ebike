@@ -81,5 +81,7 @@ SWEAT_REDUCTION_CRUISE_V = 3.5 # Ceiling above COLD_START_CUTOFF_KPH (sustained 
 SWEAT_REDUCTION_LAUNCH_KPH = 2.0  # Min speed before cold-start ceiling (>3.5V) is permitted; at standstill there is no back-EMF so the motor draws stall current and trips the CA
 
 # --- IOT CLOUD CONFIGURATION ---
-SUPABASE_URL = "https://ljjuacwtjcvqxrtqomrn.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqanVhY3d0amN2cXhydHFvbXJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTA5MDMsImV4cCI6MjA4OTU4NjkwM30.zmfCAMfbm8H2Zli5wbjGJEmkXkNy5UyKl0d3EQM-yzI"
+try:
+    from secrets import SUPABASE_URL, SUPABASE_KEY
+except ImportError:
+    raise RuntimeError("secrets.py not found. Copy secrets.example.py to secrets.py and fill in your credentials.")

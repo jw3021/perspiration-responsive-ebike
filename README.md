@@ -3,6 +3,8 @@
 **MEng Design Engineering — Imperial College London**
 Josh Williams · Supervisor: Robert Shorten · 2025–2026
 
+![Instrumented e-bike platform](bike_hero.JPG)
+
 ---
 
 ## Overview

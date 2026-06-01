@@ -11,11 +11,14 @@ import time
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
-SENDER_EMAIL = "firesparksailing@gmail.com"
-SENDER_APP_PASSWORD = "aiah ckjf bekk jfml"
 
-# Put the email address of the phone in your pocket here!
-RECEIVER_EMAIL = "firesparksailing@gmail.com"
+try:
+    from secrets import GMAIL_ADDRESS, GMAIL_APP_PASSWORD, NOTIFICATION_EMAIL
+    SENDER_EMAIL = GMAIL_ADDRESS
+    SENDER_APP_PASSWORD = GMAIL_APP_PASSWORD
+    RECEIVER_EMAIL = NOTIFICATION_EMAIL
+except ImportError:
+    raise RuntimeError("secrets.py not found. Copy secrets.example.py to secrets.py and fill in your credentials.")
 
 # =========================================================================
 
