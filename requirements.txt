@@ -1,6 +1,16 @@
+# Pi hardware (install on Raspberry Pi only)
 adafruit-circuitpython-ads1x15
 adafruit-circuitpython-mcp4725
+adafruit-circuitpython-ahtx0
+adafruit-blinka
 RPi.GPIO
 pyserial
-board
-adafruit-blinka
+
+# Data, ML, and analysis (install on any machine)
+pandas
+numpy
+matplotlib
+scikit-learn
+joblib
+supabase
+uiautomator2
