@@ -21,7 +21,7 @@ ENV/
 # Secrets and credentials
 # =============================================================================
 # If you create a secrets file to separate credentials from config:
-secrets.py
+credentials.py
 .env
 .env.*
 credentials.json

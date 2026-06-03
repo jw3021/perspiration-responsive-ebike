@@ -25,7 +25,7 @@ def fetch_ride(ride_id: str | None = None) -> pd.DataFrame:
     Fetch rows for the given ride_id, or the most recent ride if None.
     Returns a DataFrame sorted by timestamp.
     """
-    from secrets import SUPABASE_URL, SUPABASE_KEY
+    from credentials import SUPABASE_URL, SUPABASE_KEY
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
     if ride_id is None:

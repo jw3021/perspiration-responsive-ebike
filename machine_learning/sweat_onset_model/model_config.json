@@ -14,5 +14,5 @@
   "auc": 0.9242,
   "cv_accuracy_mean": 0.8467,
   "cv_accuracy_std": 0.0249,
-  "training_date": "2026-05-29"
+  "training_date": "2026-06-02"
 }

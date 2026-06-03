@@ -165,7 +165,7 @@ def main():
         print(f"  {FEATURE_COLS[i]:>30}: {importances[i]*100:.1f}%")
 
     plt.figure(figsize=(10, 5))
-    plt.bar(range(len(FEATURE_COLS)), importances[sorted_indices], color='#8E44AD')
+    plt.bar(range(len(FEATURE_COLS)), importances[sorted_indices], color=plot_style.PRIMARY, alpha=0.75)
     plt.xticks(range(len(FEATURE_COLS)), [FEATURE_COLS[i] for i in sorted_indices], rotation=30, ha='right')
     plt.ylabel("Importance")
     plt.title("Feature Importance — Fluid Loss Threshold Model")

@@ -19,16 +19,11 @@ import pandas as pd
 # Supabase connection (same safe pattern as database_stats.py)
 # --------------------------------------------------------------------------
 try:
-    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.py')
-    with open(config_path, 'r') as f:
-        config_text = f.read()
-
-    SUPABASE_URL = re.search(r'SUPABASE_URL\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
-    SUPABASE_KEY = re.search(r'SUPABASE_KEY\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
-
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from credentials import SUPABASE_URL, SUPABASE_KEY
     from supabase import create_client
 except Exception as e:
-    print(f"Error loading config or supabase: {e}")
+    print(f"Error loading Supabase credentials: {e}")
     sys.exit(1)
 
 

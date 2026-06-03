@@ -12,12 +12,7 @@ plot_style.apply()
 
 # Set up paths to safely import Supabase credentials from the global config
 try:
-    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config.py')
-    with open(config_path, 'r') as f:
-        config_text = f.read()
-
-    SUPABASE_URL = re.search(r'SUPABASE_URL\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
-    SUPABASE_KEY = re.search(r'SUPABASE_KEY\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
+    from credentials import SUPABASE_URL, SUPABASE_KEY
 
     from supabase import create_client
 except Exception as e:
