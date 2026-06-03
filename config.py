@@ -82,6 +82,6 @@ SWEAT_REDUCTION_LAUNCH_KPH = 2.0  # Min speed before cold-start ceiling (>3.5V) 
 
 # --- IOT CLOUD CONFIGURATION ---
 try:
-    from secrets import SUPABASE_URL, SUPABASE_KEY
+    from credentials import SUPABASE_URL, SUPABASE_KEY
 except ImportError:
     raise RuntimeError("secrets.py not found. Copy secrets.example.py to secrets.py and fill in your credentials.")

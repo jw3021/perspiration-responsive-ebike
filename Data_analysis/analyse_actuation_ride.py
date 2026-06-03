@@ -23,11 +23,7 @@ import plot_style
 plot_style.apply()
 
 try:
-    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.py')
-    with open(config_path, 'r') as f:
-        config_text = f.read()
-    SUPABASE_URL = re.search(r'SUPABASE_URL\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
-    SUPABASE_KEY = re.search(r'SUPABASE_KEY\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
+    from credentials import SUPABASE_URL, SUPABASE_KEY
     from supabase import create_client
 except Exception as e:
     print(f"Error loading Supabase credentials: {e}")
@@ -826,7 +822,7 @@ def plot_fluid_loss_summary(all_rides):
                    linewidth=1.4, label=f'Sweat threshold ({FLUID_THRESHOLD_L} L)'),
     ]
     legend = ax.legend(handles=legend_elements, fontsize=9, loc='upper right',
-                       frameon=True, framealpha=0.92, edgecolor='#cccccc')
+                       frameon=False)
 
     plt.tight_layout()
     output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),

@@ -4,20 +4,13 @@ import pandas as pd
 from datetime import datetime
 import textwrap
 
-import re
-
-# Safely extract Supabase credentials from config.py without triggering the Raspberry Pi 'import board' hardware crash on Windows!
+# Supabase credentials loaded from secrets.py (gitignored)
 try:
-    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.py')
-    with open(config_path, 'r') as f:
-        config_text = f.read()
-        
-    SUPABASE_URL = re.search(r'SUPABASE_URL\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
-    SUPABASE_KEY = re.search(r'SUPABASE_KEY\s*=\s*["\']([^"\']+)["\']', config_text).group(1)
-    
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from credentials import SUPABASE_URL, SUPABASE_KEY
     from supabase import create_client
 except Exception as e:
-    print("Error: Missing dependencies or could not parse config.py!")
+    print("Error: Missing dependencies or could not load secrets.py!")
     print("Verify you have the Supabase url in config.py and run: pip install supabase pandas")
     print(f"Details: {e}")
     sys.exit(1)

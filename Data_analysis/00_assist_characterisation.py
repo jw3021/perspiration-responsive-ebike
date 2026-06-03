@@ -31,7 +31,7 @@ def theoretical_voltage(torque_nm, max_v):
 
 def plot_torque_voltage(torque_range, output_dir):
     """Custom system: rider torque → DAC voltage (theoretical curves, no scatter)."""
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(7, 5.6))
 
     band_labels  = {"LOW": "Normal Mode", "HIGH": "Sweat Reduction Mode"}
     band_colours = {"LOW": plot_style.PRIMARY, "HIGH": plot_style.ACCENT}
@@ -44,11 +44,12 @@ def plot_torque_voltage(torque_range, output_dir):
     ax.axvline(x=MAX_TORQUE_INPUT_NM, color=plot_style.NEUTRAL, linestyle='--',
                linewidth=1.2, label=f"Saturation ({int(MAX_TORQUE_INPUT_NM)} Nm)")
 
-    ax.set_xlabel("Rider input torque (Nm)", fontsize=13)
-    ax.set_ylabel("DAC output voltage (V)", fontsize=13)
+    ax.set_xlabel("Rider input torque (Nm)", fontsize=14)
+    ax.set_ylabel("DAC output voltage (V)", fontsize=14)
+    ax.tick_params(axis='both', labelsize=11)
     ax.set_xlim(0, 70)
     ax.set_ylim(0.8, 5.0)
-    ax.legend(loc='upper left', fontsize=10)
+    ax.legend(loc='upper left', fontsize=11)
 
     output_path = os.path.join(output_dir, "00_torque_voltage.png")
     fig.savefig(output_path)
@@ -65,7 +66,7 @@ def plot_speed_ceiling(output_dir):
 
     speed_range = np.linspace(0, 25, 500)
 
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(7, 5.6))
 
     ax.plot(speed_range, np.full_like(speed_range, V_NORMAL),
             color=plot_style.PRIMARY, linewidth=1.8, label="Normal Mode")
@@ -85,13 +86,14 @@ def plot_speed_ceiling(output_dir):
 
     ax.text(COLD_START_CUTOFF_KPH + 0.5, 1.1,
             "← Cold-start zone",
-            fontsize=10, color=plot_style.NEUTRAL, ha="left", va="bottom")
+            fontsize=12, color=plot_style.NEUTRAL, ha="left", va="bottom")
 
-    ax.set_xlabel("Speed (km/h)", fontsize=13)
-    ax.set_ylabel("Voltage ceiling (V)", fontsize=13)
+    ax.set_xlabel("Speed (km/h)", fontsize=14)
+    ax.set_ylabel("Voltage ceiling (V)", fontsize=14)
+    ax.tick_params(axis='both', labelsize=11)
     ax.set_xlim(0, 25)
     ax.set_ylim(0.8, 5.0)
-    ax.legend(loc="upper right", fontsize=10)
+    ax.legend(loc="upper right", fontsize=11)
 
     output_path = os.path.join(output_dir, "00_speed_ceiling.png")
     fig.savefig(output_path)
