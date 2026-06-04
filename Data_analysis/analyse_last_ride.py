@@ -194,17 +194,12 @@ def plot_ride(df: pd.DataFrame, ride_id: str):
     ax5.set_ylabel("L / hour")
     ax5.grid(True, alpha=0.3)
 
-    # ── 6. Skin temp vs ambient temp ─────────────────────────────────────────
+    # ── 6. Ambient temperature ───────────────────────────────────────────────
     ax6 = fig.add_subplot(gs[1, 2])
-    ax6.plot(x, df["temp_c"], color="#795548", linewidth=1.2, label="Ambient")
-    skin_data = df.dropna(subset=["skin_temp_c"])
-    if not skin_data.empty:
-        ax6.plot(skin_data["elapsed_min"], skin_data["skin_temp_c"],
-                 color="#FF5722", linewidth=1.5, label="Skin temp")
-    ax6.set_title("Temperature")
+    ax6.plot(x, df["temp_c"], color="#795548", linewidth=1.2)
+    ax6.set_title("Ambient Temperature")
     ax6.set_xlabel("Elapsed (min)")
     ax6.set_ylabel("°C")
-    ax6.legend(fontsize=7)
     ax6.grid(True, alpha=0.3)
 
     # ── 7. Torque vs Voltage scatter (verify algorithm mapping) ────────────────
