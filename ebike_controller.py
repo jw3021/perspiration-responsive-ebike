@@ -639,6 +639,7 @@ def main():
             # MOTOR_TEST mode forces sweat reduction on immediately (no ML required).
             # ACTUATION mode uses the ML trigger latch as normal.
             in_sweat_reduction = (
+                web_server.demo_power_high or
                 (web_server.ride_mode == "ACTUATION" and sweat_predictor.triggered) or
                 web_server.ride_mode == "MOTOR_TEST"
             )
@@ -727,6 +728,14 @@ def main():
                 else:
                     ml_display = "off"
                 print(f"RPM: {current_cadence_rpm:.1f} | Spd: {current_speed_kph:.1f} | Trq: {smoothed_torque:.1f} | V_Out: {target_voltage:.2f} | Band: {current_power_band} | ML: {ml_display} | Fluid: {fluid_display} | Rate: {rate_display} | Skin: {skin_display}", flush=True)
+                web_server.live_data.update({
+                    "cadence_rpm":   round(current_cadence_rpm, 1),
+                    "torque_nm":     round(smoothed_torque, 1),
+                    "temp_c":        round(current_temp_c, 1),
+                    "speed_kph":     round(current_speed_kph, 1),
+                    "voltage_out_v": round(target_voltage, 2),
+                    "power_mode":    "HIGH" if in_sweat_reduction else "LOW",
+                })
 
                 # --- CSV LOGGING LOGIC ---
                 if web_server.ride_active and not is_logging:
