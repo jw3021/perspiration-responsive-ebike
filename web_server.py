@@ -10,6 +10,19 @@ last_ride_id         = "UNKNOWN"
 sweat_reduction_active = False   # Set True by ebike_controller when ML triggers
 sweat_triggered_at   = None      # ISO timestamp string of when actuation fired
 
+# Live sensor data — updated each loop iteration by ebike_controller
+live_data = {
+    "cadence_rpm":   0.0,
+    "torque_nm":     0.0,
+    "temp_c":        0.0,
+    "speed_kph":     0.0,
+    "voltage_out_v": 1.0,
+    "power_mode":    "LOW",   # "LOW" or "HIGH" — reflects active power band
+}
+
+# Demo override — toggled from /display without needing a formal ride
+demo_power_high = False
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -367,6 +380,288 @@ def submit_survey():
 @app.route('/status', methods=['GET'])
 def status():
     return jsonify({"active": ride_active, "mode": ride_mode})
+
+@app.route('/live', methods=['GET'])
+def live():
+    """Returns current sensor snapshot as JSON — polled by the /display dashboard."""
+    return jsonify(live_data)
+
+@app.route('/demo_power', methods=['POST'])
+def demo_power():
+    """Toggles the demo power override between LOW and HIGH — called from /display."""
+    global demo_power_high
+    demo_power_high = not demo_power_high
+    print(f"\n[DEMO] Power mode set to {'HIGH (sweat reduction)' if demo_power_high else 'LOW (normal)'}")
+    return jsonify({"demo_power_high": demo_power_high})
+
+DISPLAY_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+    <title>E-Bike Live</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0d0d0d;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+            gap: 14px;
+        }
+        #header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: #ddd;
+        }
+        .badge {
+            background: #1c1c1c;
+            border-radius: 10px;
+            padding: 8px 20px;
+            text-align: center;
+            border: 1px solid #2a2a2a;
+        }
+        .badge-label {
+            font-size: 10px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: #666;
+            margin-bottom: 2px;
+        }
+        .badge-value {
+            font-size: 22px;
+            font-weight: 700;
+            color: #f39c12;
+        }
+        #power-btn {
+            width: 100%;
+            padding: 12px 24px;
+            border-radius: 10px;
+            border: none;
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.1s;
+            flex-shrink: 0;
+        }
+        #power-btn:active { transform: scale(0.98); opacity: 0.85; }
+        #power-btn.low  { background: linear-gradient(135deg, #1a1f2e, #2e3550); color: #5B9BD5; border: 1px solid #5B9BD5; }
+        #power-btn.high { background: linear-gradient(135deg, #1a2e1a, #2a4a2a); color: #2ECC71; border: 1px solid #2ECC71; }
+        #charts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            flex: 1;
+            min-height: 0;
+        }
+        .chart-card {
+            background: #141414;
+            border-radius: 12px;
+            padding: 16px 16px 12px 16px;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #1e1e1e;
+        }
+        .chart-title {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: #555;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+        .chart-wrap {
+            flex: 1;
+            position: relative;
+            min-height: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>E-Bike &mdash; Live Sensor Data</h1>
+        <div class="badge">
+            <div class="badge-label">Ambient Temp</div>
+            <div class="badge-value" id="temp-val">--&nbsp;&deg;C</div>
+        </div>
+    </div>
+
+    <button id="power-btn" class="low" onclick="togglePower()">
+        &#9654; LOW POWER MODE &mdash; tap to activate sweat reduction
+    </button>
+
+    <div id="charts">
+        <div class="chart-card">
+            <div class="chart-title">Sensor Inputs</div>
+            <div class="chart-wrap"><canvas id="leftChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Motor Output</div>
+            <div class="chart-wrap"><canvas id="rightChart"></canvas></div>
+        </div>
+    </div>
+
+    <script>
+        const N = 30;
+        const emptyWindow = () => Array(N).fill(null);
+
+        const cadenceData = emptyWindow();
+        const torqueData  = emptyWindow();
+        const speedData   = emptyWindow();
+        const voltageData = emptyWindow();
+        const labels      = Array(N).fill('');
+
+        const baseOpts = {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    labels: { color: '#bbb', font: { size: 13, weight: '600' }, padding: 20, boxWidth: 14 }
+                },
+                tooltip: { enabled: false }
+            }
+        };
+
+        function yAxis(color, label, min, max, position, drawGrid) {
+            return {
+                type: 'linear',
+                position,
+                min,
+                max,
+                title: {
+                    display: true,
+                    text: label,
+                    color,
+                    font: { size: 12, weight: 'bold' }
+                },
+                ticks: { color, font: { size: 11 }, maxTicksLimit: 6 },
+                grid: {
+                    color: drawGrid ? 'rgba(255,255,255,0.05)' : 'transparent',
+                    drawBorder: false
+                },
+                border: { color: 'rgba(255,255,255,0.1)' }
+            };
+        }
+
+        function dataset(label, data, color, yAxisID) {
+            return {
+                label,
+                data,
+                borderColor: color,
+                backgroundColor: color.replace('rgb', 'rgba').replace(')', ',0.08)'),
+                borderWidth: 2.5,
+                pointRadius: 0,
+                tension: 0.35,
+                fill: true,
+                yAxisID
+            };
+        }
+
+        // LEFT — Sensor Inputs (Cadence + Torque)
+        const leftChart = new Chart(document.getElementById('leftChart'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    dataset('Cadence (RPM)', cadenceData, 'rgb(243,156,18)',  'yCadence'),
+                    dataset('Torque (Nm)',   torqueData,  'rgb(231,76,60)',   'yTorque'),
+                ]
+            },
+            options: {
+                ...baseOpts,
+                scales: {
+                    x: { ticks: { display: false }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                    yCadence: yAxis('rgb(243,156,18)', 'Cadence (RPM)', 0, 120, 'left',  true),
+                    yTorque:  yAxis('rgb(231,76,60)',  'Torque (Nm)',   0, 60,  'right', false),
+                }
+            }
+        });
+
+        // RIGHT — Motor Output (Speed + Voltage)
+        const rightChart = new Chart(document.getElementById('rightChart'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    dataset('Speed (km/h)',     speedData,   'rgb(52,152,219)',  'ySpeed'),
+                    dataset('Motor Voltage (V)', voltageData, 'rgb(46,204,113)', 'yVoltage'),
+                ]
+            },
+            options: {
+                ...baseOpts,
+                scales: {
+                    x: { ticks: { display: false }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                    ySpeed:   yAxis('rgb(52,152,219)',  'Speed (km/h)',      0,   30,  'left',  true),
+                    yVoltage: yAxis('rgb(46,204,113)', 'Motor Voltage (V)', 1.0, 4.5, 'right', false),
+                }
+            }
+        });
+
+        function push(arr, val) { arr.shift(); arr.push(val); }
+
+        function updatePowerBtn(mode) {
+            const btn = document.getElementById('power-btn');
+            if (mode === 'HIGH') {
+                btn.className = 'high';
+                btn.innerHTML = '&#9646;&#9646; SWEAT REDUCTION &mdash; tap to return to low power';
+            } else {
+                btn.className = 'low';
+                btn.innerHTML = '&#9654; LOW POWER MODE &mdash; tap to activate sweat reduction';
+            }
+        }
+
+        async function togglePower() {
+            try {
+                await fetch('/demo_power', { method: 'POST' });
+                poll(); // immediate refresh so button state updates without waiting
+            } catch(e) {}
+        }
+
+        async function poll() {
+            try {
+                const r = await fetch('/live');
+                const d = await r.json();
+
+                push(cadenceData, d.cadence_rpm);
+                push(torqueData,  d.torque_nm);
+                push(speedData,   d.speed_kph);
+                push(voltageData, d.voltage_out_v);
+
+                document.getElementById('temp-val').textContent =
+                    d.temp_c > 0 ? d.temp_c.toFixed(1) + ' \u00b0C' : '-- \u00b0C';
+
+                updatePowerBtn(d.power_mode);
+
+                leftChart.update('none');
+                rightChart.update('none');
+            } catch(e) { /* ignore mid-demo network blips */ }
+        }
+
+        poll();
+        setInterval(poll, 500);
+    </script>
+</body>
+</html>"""
+
+@app.route('/display')
+def display():
+    """Full-screen live chart dashboard — open on a presentation screen."""
+    return DISPLAY_TEMPLATE
 
 if __name__ == '__main__':
     print("=" * 60)

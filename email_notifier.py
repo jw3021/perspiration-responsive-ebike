@@ -18,7 +18,7 @@ try:
     SENDER_APP_PASSWORD = GMAIL_APP_PASSWORD
     RECEIVER_EMAIL = NOTIFICATION_EMAIL
 except ImportError:
-    raise RuntimeError("secrets.py not found. Copy secrets.example.py to secrets.py and fill in your credentials.")
+    raise RuntimeError("credentials.py not found. Copy credentials.example.py to credentials.py and fill in your credentials.")
 
 # =========================================================================
 
